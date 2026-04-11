@@ -234,6 +234,7 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [authError, setAuthError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Confirmation state
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
@@ -439,10 +440,10 @@ export default function App() {
     if (!file || !user || !userData) return;
 
     // Check subscription limits
-    if (userData.subscriptionTier === 'free' && userData.analysesCount >= 10) {
+    if (userData.subscriptionTier === 'free' && userData.analysesCount >= 3) {
       setShowLimitModal({
         type: 'analysis',
-        message: "You've reached the limit of 10 analyses for the Free tier. Upgrade to Pro for unlimited behavioral insights!"
+        message: "You've reached the limit of 3 analyses for the Free tier. Upgrade to Pro for unlimited behavioral insights!"
       });
       return;
     }
@@ -479,6 +480,10 @@ export default function App() {
       
       // Check for AI Studio "Cookie check" page or other HTML interception
       if (responseText.includes('<title>Cookie check</title>') || responseText.includes('Authenticate in new window')) {
+        setNotification({ 
+          message: "Authentication session expired. Please open the app in a new tab to continue.", 
+          type: 'error' 
+        });
         throw new Error("Authentication session expired or cookies are blocked. Please open the app in a new tab or click the 'Authenticate' button if it appears.");
       }
 
@@ -823,6 +828,26 @@ export default function App() {
     }
   };
 
+  const handleGoogleSignIn = async () => {
+    if (isLoggingIn) return;
+    setIsLoggingIn(true);
+    setAuthError('');
+    try {
+      await signInWithGoogle();
+    } catch (error: any) {
+      console.error("Google Sign In Error:", error);
+      if (error.code === 'auth/cancelled-popup-request') {
+        setAuthError("A login popup is already open or was blocked. Please check your browser's popup settings.");
+      } else if (error.code === 'auth/popup-closed-by-user') {
+        setAuthError("Login popup was closed before completion. Please try again.");
+      } else {
+        setAuthError(error.message || "Failed to sign in with Google.");
+      }
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
@@ -942,11 +967,16 @@ export default function App() {
           {authMode === 'google' ? (
             <div className="space-y-4">
               <button
-                onClick={signInWithGoogle}
-                className="w-full flex items-center justify-center gap-3 bg-white border border-slate-200 text-slate-700 px-6 py-4 rounded-2xl font-medium hover:bg-slate-50 transition-all shadow-sm hover:shadow-md active:scale-[0.98]"
+                onClick={handleGoogleSignIn}
+                disabled={isLoggingIn}
+                className={`w-full flex items-center justify-center gap-3 bg-white border border-slate-200 text-slate-700 px-6 py-4 rounded-2xl font-medium transition-all shadow-sm hover:shadow-md active:scale-[0.98] ${isLoggingIn ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-50'}`}
               >
-                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/layout/google.svg" className="w-5 h-5" alt="Google" />
-                Sign in with Google
+                {isLoggingIn ? (
+                  <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/layout/google.svg" className="w-5 h-5" alt="Google" />
+                )}
+                {isLoggingIn ? 'Signing in...' : 'Sign in with Google'}
               </button>
               <div className="relative">
                 <div className="absolute inset-0 flex items-center">
@@ -1002,9 +1032,15 @@ export default function App() {
               </div>
 
               {authError && (
-                <div className="p-3 rounded-lg bg-red-50 text-red-600 text-sm flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4" />
-                  {authError}
+                <div className="p-4 rounded-2xl bg-red-50 text-red-600 text-sm space-y-2">
+                  <div className="flex items-center gap-2 font-bold">
+                    <AlertCircle className="w-4 h-4" />
+                    Authentication Error
+                  </div>
+                  <p className="opacity-90">{authError}</p>
+                  <p className="text-xs pt-2 border-t border-red-100">
+                    Tip: If popups are blocked, try opening the app in a <a href={window.location.href} target="_blank" rel="noopener noreferrer" className="underline font-bold">new tab</a>.
+                  </p>
                 </div>
               )}
 
@@ -1383,9 +1419,15 @@ export default function App() {
                               {analysis.mediaType === 'video' ? <Play className="w-6 h-6 text-slate-400" /> : <Activity className="w-6 h-6 text-slate-400" />}
                             </div>
                             <div>
-                              <p className="font-semibold text-slate-900">{analysis.petName || 'My Pet'}</p>
+                              <p className="font-semibold text-slate-900 truncate max-w-[200px]">
+                                {analysis.result?.emotionalState ? 
+                                  (analysis.result.emotionalState.length > 40 ? 
+                                    analysis.result.emotionalState.substring(0, 40) + '...' : 
+                                    analysis.result.emotionalState) : 
+                                  'New Analysis'}
+                              </p>
                               <p className="text-xs text-slate-500">
-                                {analysis.createdAt?.seconds ? new Date(analysis.createdAt.seconds * 1000).toLocaleDateString() : 'Just now'}
+                                {analysis.petName || 'My Pet'} • {analysis.createdAt?.seconds ? new Date(analysis.createdAt.seconds * 1000).toLocaleDateString() : 'Just now'}
                               </p>
                             </div>
                           </div>
@@ -1506,7 +1548,13 @@ export default function App() {
                                   {analysis.mediaType === 'video' ? <Play className="w-6 h-6 text-slate-400" /> : <Activity className="w-6 h-6 text-slate-400" />}
                                 </div>
                                 <div>
-                                  <p className="font-semibold text-slate-900">{analysis.result?.emotionalState || 'Analysis'}</p>
+                                  <p className="font-semibold text-slate-900 truncate max-w-[200px]">
+                                    {analysis.result?.emotionalState ? 
+                                      (analysis.result.emotionalState.length > 40 ? 
+                                        analysis.result.emotionalState.substring(0, 40) + '...' : 
+                                        analysis.result.emotionalState) : 
+                                      'New Analysis'}
+                                  </p>
                                   <p className="text-xs text-slate-500">
                                     {analysis.createdAt?.seconds ? new Date(analysis.createdAt.seconds * 1000).toLocaleString() : 'Just now'}
                                   </p>
@@ -1828,9 +1876,15 @@ export default function App() {
                         {analysis.mediaType === 'video' ? <Play className="w-6 h-6 text-slate-400" /> : <Activity className="w-6 h-6 text-slate-400" />}
                       </div>
                       <div>
-                        <p className="font-semibold text-slate-900">{analysis.petName || 'My Pet'}</p>
+                        <p className="font-semibold text-slate-900 truncate max-w-[250px]">
+                          {analysis.result?.emotionalState ? 
+                            (analysis.result.emotionalState.length > 50 ? 
+                              analysis.result.emotionalState.substring(0, 50) + '...' : 
+                              analysis.result.emotionalState) : 
+                            'New Analysis'}
+                        </p>
                         <p className="text-xs text-slate-500">
-                          {analysis.createdAt?.seconds ? new Date(analysis.createdAt.seconds * 1000).toLocaleString() : 'Just now'}
+                          {analysis.petName || 'My Pet'} • {analysis.createdAt?.seconds ? new Date(analysis.createdAt.seconds * 1000).toLocaleString() : 'Just now'}
                         </p>
                       </div>
                     </div>
@@ -2072,7 +2126,7 @@ export default function App() {
                           <p className="text-sm text-slate-500 leading-relaxed">
                             {userData?.subscriptionTier === 'pro' 
                               ? 'You have unlimited access to behavioral analyses and expert follow-up chats.' 
-                              : `You have used ${userData?.analysesCount || 0}/10 free analyses. Upgrade for unlimited access.`}
+                              : `You have used ${userData?.analysesCount || 0}/3 free analyses. Upgrade for unlimited access.`}
                           </p>
                         </div>
                         {userData?.subscriptionTier !== 'pro' && (
@@ -2089,7 +2143,7 @@ export default function App() {
                         <div className="mt-6 pt-6 border-t border-slate-50 grid grid-cols-2 gap-4">
                           <div className="flex items-center gap-2 text-xs text-slate-500">
                             <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                            10 Analyses Total
+                            3 Analyses Total
                           </div>
                           <div className="flex items-center gap-2 text-xs text-slate-500">
                             <CheckCircle2 className="w-4 h-4 text-emerald-500" />
