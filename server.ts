@@ -35,7 +35,7 @@ async function startServer() {
   }
 
   // API Routes
-  app.post("/api/compress", upload.single("media"), async (req: MulterRequest, res) => {
+  app.post("/api/process", upload.single("media"), async (req: MulterRequest, res) => {
     let tempPath = req.file?.path;
     let compressedPath = "";
 
@@ -44,18 +44,29 @@ async function startServer() {
         return res.status(400).json({ error: "No media file uploaded" });
       }
 
-      // Compression using FFmpeg
-      if (req.file.mimetype.startsWith("video")) {
+      // Strict type enforcement for security
+      const isVideo = req.file.mimetype.startsWith("video/");
+      const isAudio = req.file.mimetype.startsWith("audio/");
+      
+      if (!isVideo && !isAudio) {
+        if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+        return res.status(400).json({ error: "Invalid file type. Only video and audio are allowed." });
+      }
+
+      // 1. Compression using FFmpeg (Optimized for Cost/Tokens)
+      if (isVideo) {
         compressedPath = `uploads/compressed_${req.file.filename}.mp4`;
         await new Promise((resolve, reject) => {
           ffmpeg(tempPath)
             .outputOptions([
               "-vcodec libx264",
-              "-crf 28",
+              "-crf 32", // Higher compression (smaller file)
               "-preset faster",
-              "-vf scale='min(1280,iw)':-2",
+              "-vf scale='min(854,iw)':-2,fps=15", // Scale to 480p and cap at 15fps (huge token saver)
               "-acodec aac",
-              "-b:a 128k"
+              "-ac 1", // Mono audio
+              "-b:a 64k", // Lower audio bitrate
+              "-t 60" // Limit to 60 seconds for cost control
             ])
             .save(compressedPath)
             .on("end", resolve)
@@ -66,13 +77,14 @@ async function startServer() {
       const mediaBuffer = fs.readFileSync(compressedPath || tempPath);
       const mimeType = compressedPath ? "video/mp4" : req.file.mimetype;
 
+      // Return processed media to frontend for Gemini analysis
       res.json({
         base64: mediaBuffer.toString("base64"),
         mimeType: mimeType
       });
     } catch (error: any) {
-      console.error("Compression error:", error);
-      res.status(500).json({ error: error.message });
+      console.error("Processing error:", error);
+      res.status(500).json({ error: "An error occurred during media processing." });
     } finally {
       // Cleanup temp files
       if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
