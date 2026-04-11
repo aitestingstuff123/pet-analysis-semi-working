@@ -6,25 +6,45 @@ import fs from "fs";
 import multer from "multer";
 import dotenv from "dotenv";
 import ffmpeg from "fluent-ffmpeg";
-import ffmpegInstaller from "ffmpeg-static";
+import ffmpegPath from "ffmpeg-static";
+import cors from "cors";
 import { initializeApp } from 'firebase/app';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 dotenv.config();
 
-// Initialize Firebase Client SDK (Works on server and uses API Key instead of Service Account)
-const firebaseConfig = JSON.parse(fs.readFileSync("./firebase-applet-config.json", "utf-8"));
-const firebaseApp = initializeApp(firebaseConfig);
-const storage = getStorage(firebaseApp);
+// Initialize Firebase Client SDK
+let storage: any;
+try {
+  const configPath = path.resolve(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(configPath)) {
+    const firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    const firebaseApp = initializeApp(firebaseConfig);
+    storage = getStorage(firebaseApp);
+    console.log("[Server] Firebase Storage initialized");
+  } else {
+    console.warn("[Server] firebase-applet-config.json not found");
+  }
+} catch (err) {
+  console.error("[Server] Firebase initialization error:", err);
+}
 
-if (ffmpegInstaller) {
-  ffmpeg.setFfmpegPath(ffmpegInstaller);
+if (ffmpegPath) {
+  console.log("[Server] Setting FFmpeg path to:", ffmpegPath);
+  ffmpeg.setFfmpegPath(ffmpegPath);
+} else {
+  console.warn("[Server] ffmpeg-static path not found");
 }
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const upload = multer({ dest: "uploads/" });
+const upload = multer({ 
+  dest: "uploads/",
+  limits: {
+    fileSize: 50 * 1024 * 1024 // 50MB
+  }
+});
 
 interface MulterRequest extends express.Request {
   file?: any;
@@ -34,6 +54,7 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  app.use(cors());
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
@@ -55,6 +76,7 @@ async function startServer() {
 
   // API Routes
   app.post("/api/process", (req, res, next) => {
+    console.log("[Server] Entering /api/process route");
     upload.single("media")(req, res, (err) => {
       if (err) {
         console.error("[Server] Multer Error:", err);
@@ -62,18 +84,20 @@ async function startServer() {
           error: err instanceof multer.MulterError ? `File upload error: ${err.message}` : "Failed to upload file" 
         });
       }
+      console.log("[Server] Multer upload successful, proceeding to handler");
       next();
     });
   }, async (req: MulterRequest, res) => {
-    console.log(`[Server] Received upload request: ${req.file?.originalname} (${req.file?.mimetype})`);
-    console.log(`[Server] Request Body Keys:`, Object.keys(req.body));
-    console.log(`[Server] User ID:`, req.body.userId);
-    console.log(`[Server] User Question Length:`, req.body.userQuestion?.length || 0);
+    console.log(`[Server] Processing upload: ${req.file?.originalname}`);
     
     let tempPath = req.file?.path;
     let compressedPath = "";
 
     try {
+      if (!storage) {
+        throw new Error("Firebase Storage not initialized. Check server logs.");
+      }
+
       if (!req.file) {
         console.error("[Server] No file received in request");
         return res.status(400).json({ error: "No media file uploaded" });

@@ -47,6 +47,14 @@ service cloud.firestore {
     //   - content: string (required)
     //   - createdAt: timestamp
     //
+    // Collection: user_stats
+    // Document ID: {userId}
+    // Fields:
+    //   - current_streak: number (required)
+    //   - last_upload_date: timestamp
+    //   - total_sessions: number (required)
+    //   - activity_log: list of timestamps
+    //
     // ===============================================================
 
     // ===============================================================
@@ -70,13 +78,16 @@ service cloud.firestore {
     function isValidUser(data) {
       return data.keys().hasAll(['email', 'role']) &&
              data.email is string &&
-             data.role in ['user', 'admin'];
+             data.role in ['user', 'admin'] &&
+             (!('analysesCount' in data) || data.analysesCount is number) &&
+             (!('subscriptionTier' in data) || data.subscriptionTier in ['free', 'pro']);
     }
 
     function isValidAnalysis(data) {
       return data.keys().hasAll(['userId', 'status', 'createdAt']) &&
              data.userId is string &&
-             data.status in ['pending', 'processing', 'completed', 'failed'];
+             data.status in ['pending', 'processing', 'completed', 'failed'] &&
+             data.createdAt is timestamp;
     }
 
     function isValidPet(data) {
@@ -90,7 +101,16 @@ service cloud.firestore {
       return data.keys().hasAll(['analysisId', 'role', 'content', 'createdAt']) &&
              data.analysisId is string &&
              data.role in ['user', 'assistant'] &&
-             data.content is string;
+             data.content is string &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidUserStats(data) {
+      return data.keys().hasAll(['current_streak', 'total_sessions']) &&
+             data.current_streak is number &&
+             data.total_sessions is number &&
+             (!('last_upload_date' in data) || data.last_upload_date is timestamp) &&
+             (!('activity_log' in data) || data.activity_log is list);
     }
 
     // ===============================================================
@@ -127,6 +147,11 @@ service cloud.firestore {
       allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
       allow update: if isAuthenticated() && isOwner(resource.data.userId);
       allow delete: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
+    }
+
+    match /user_stats/{userId} {
+      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      allow create, update: if isAuthenticated() && isOwner(userId) && isValidUserStats(request.resource.data);
     }
 
     match /{document=**} {

@@ -36,39 +36,30 @@ import {
   Pencil,
   Calendar,
   Clock,
-  Bell
+  Bell,
+  Flame
 } from 'lucide-react';
 import { GoogleGenAI, Type } from '@google/genai';
 import { useAuth } from './lib/AuthContext';
 
-const MoodTrendChart = ({ analyses }: { analyses: any[] }) => {
-  const moodMap: Record<string, number> = {
-    'Calm': 5,
-    'Happy': 5,
-    'Curious': 4,
-    'Playful': 4,
-    'Neutral': 3,
-    'Alert': 3,
-    'Anxious': 2,
-    'Stressed': 1,
-    'Fearful': 1,
-    'Aggressive': 0
-  };
+const ConsistencyChart = ({ activityLog }: { activityLog: any[] }) => {
+  // activityLog is an array of timestamps
+  const data = [...activityLog]
+    .sort((a, b) => a.toMillis() - b.toMillis())
+    .reduce((acc: any[], curr, idx) => {
+      const date = new Date(curr.toMillis()).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      acc.push({
+        date,
+        sessions: idx + 1,
+        target: 30
+      });
+      return acc;
+    }, []);
 
-  const data = analyses
-    .filter(a => a.status === 'completed' && a.result?.emotionalState)
-    .sort((a, b) => a.createdAt.toMillis() - b.createdAt.toMillis())
-    .map(a => ({
-      date: new Date(a.createdAt.toMillis()).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      mood: moodMap[a.result.emotionalState] || 3,
-      label: a.result.emotionalState,
-      pet: a.petName
-    }));
-
-  if (data.length < 2) {
+  if (data.length === 0) {
     return (
       <div className="h-48 flex items-center justify-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-        <p className="text-slate-400 text-sm">Not enough data to show trends yet.</p>
+        <p className="text-slate-400 text-sm">Start training to see your progress!</p>
       </div>
     );
   }
@@ -78,9 +69,9 @@ const MoodTrendChart = ({ analyses }: { analyses: any[] }) => {
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={data}>
           <defs>
-            <linearGradient id="colorMood" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.1}/>
-              <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
+            <linearGradient id="colorSessions" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.1}/>
+              <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
@@ -91,14 +82,18 @@ const MoodTrendChart = ({ analyses }: { analyses: any[] }) => {
             tick={{ fontSize: 10, fill: '#94a3b8' }}
             dy={10}
           />
-          <YAxis hide domain={[0, 5]} />
+          <YAxis 
+            axisLine={false}
+            tickLine={false}
+            tick={{ fontSize: 10, fill: '#94a3b8' }}
+          />
           <Tooltip 
             content={({ active, payload }) => {
               if (active && payload && payload.length) {
                 return (
                   <div className="bg-white p-3 rounded-xl shadow-xl border border-slate-100">
                     <p className="text-xs font-bold text-slate-400 uppercase mb-1">{payload[0].payload.date}</p>
-                    <p className="text-sm font-bold text-indigo-600">{payload[0].payload.pet}: {payload[0].payload.label}</p>
+                    <p className="text-sm font-bold text-amber-600">Total Sessions: {payload[0].value}</p>
                   </div>
                 );
               }
@@ -107,14 +102,65 @@ const MoodTrendChart = ({ analyses }: { analyses: any[] }) => {
           />
           <Area 
             type="monotone" 
-            dataKey="mood" 
-            stroke="#4f46e5" 
+            dataKey="sessions" 
+            stroke="#f59e0b" 
             strokeWidth={3}
             fillOpacity={1} 
-            fill="url(#colorMood)" 
+            fill="url(#colorSessions)" 
+          />
+          <Line 
+            type="monotone" 
+            dataKey="target" 
+            stroke="#94a3b8" 
+            strokeDasharray="5 5" 
+            dot={false}
+            strokeWidth={1}
           />
         </AreaChart>
       </ResponsiveContainer>
+    </div>
+  );
+};
+
+const StreakHeader = ({ streak, activityLog }: { streak: number, activityLog: any[] }) => {
+  const today = new Date().toDateString();
+  const hasUploadedToday = activityLog.some(ts => new Date(ts.toMillis()).toDateString() === today);
+
+  return (
+    <div className="flex items-center gap-6 bg-white p-6 rounded-3xl border border-slate-200 shadow-sm mb-8">
+      <div className="relative w-20 h-20">
+        <svg className="w-full h-full" viewBox="0 0 100 100">
+          <circle className="text-slate-100 stroke-current" strokeWidth="8" cx="50" cy="50" r="40" fill="transparent" />
+          <motion.circle 
+            className="text-amber-500 stroke-current" 
+            strokeWidth="8" 
+            strokeDasharray={251.2}
+            initial={{ strokeDashoffset: 251.2 }}
+            animate={{ strokeDashoffset: hasUploadedToday ? 0 : 251.2 }}
+            transition={{ duration: 1, ease: "easeOut" }}
+            strokeLinecap="round" 
+            cx="50" cy="50" r="40" fill="transparent" 
+          />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <Flame className={`w-8 h-8 ${hasUploadedToday ? 'text-amber-500' : 'text-slate-300'}`} />
+        </div>
+      </div>
+      <div>
+        <div className="flex items-center gap-2">
+          <h2 className="text-3xl font-black text-slate-900">🔥 {streak} Day Streak</h2>
+          {hasUploadedToday && (
+            <span className="bg-amber-100 text-amber-600 text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider">
+              Daily Goal Met
+            </span>
+          )}
+        </div>
+        <p className="text-slate-500 mt-1">
+          {hasUploadedToday 
+            ? "Great job! You've completed your training for today." 
+            : "Keep the momentum going! Upload a video to maintain your streak."}
+        </p>
+      </div>
     </div>
   );
 };
@@ -136,6 +182,7 @@ import {
   getDownloadURL,
   addDoc,
   updateDoc,
+  setDoc,
   deleteDoc,
   doc,
   createUserWithEmailAndPassword,
@@ -149,7 +196,7 @@ import {
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 export default function App() {
-  const { user, loading, isAdmin } = useAuth();
+  const { user, userData, loading, isAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'upload' | 'history' | 'pets' | 'settings' | 'reminders'>('dashboard');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -163,6 +210,7 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [isSendingMessage, setIsSendingMessage] = useState(false);
+  const [showLimitModal, setShowLimitModal] = useState<{ type: 'analysis' | 'chat', message: string } | null>(null);
 
   // Pet management state
   const [isAddingPet, setIsAddingPet] = useState(false);
@@ -215,6 +263,71 @@ export default function App() {
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
   const [isSendingReset, setIsSendingReset] = useState(false);
   const [settingsName, setSettingsName] = useState('');
+  const [userStats, setUserStats] = useState<any>(null);
+
+  const updateStreak = async (userId: string) => {
+    const statsRef = doc(db, 'user_stats', userId);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    let stats = userStats;
+    if (!stats) {
+      // Fallback if state hasn't loaded yet
+      stats = {
+        current_streak: 0,
+        total_sessions: 0,
+        activity_log: [],
+        last_upload_date: null
+      };
+    }
+
+    let newStreak = stats.current_streak || 0;
+    const lastUpload = stats.last_upload_date ? new Date(stats.last_upload_date.toMillis()) : null;
+    
+    if (!lastUpload) {
+      newStreak = 1;
+    } else {
+      const lastUploadDay = new Date(lastUpload.getFullYear(), lastUpload.getMonth(), lastUpload.getDate());
+      const diffDays = Math.floor((today.getTime() - lastUploadDay.getTime()) / (1000 * 60 * 60 * 24));
+
+      if (diffDays === 1) {
+        // Consecutive day
+        newStreak += 1;
+      } else if (diffDays > 1) {
+        // Streak broken
+        const diffHours = (now.getTime() - lastUpload.getTime()) / (1000 * 60 * 60);
+        if (diffHours > 36) {
+          newStreak = 1;
+        }
+      } else if (diffDays === 0) {
+        // Already uploaded today, streak stays same
+      }
+    }
+
+    try {
+      await updateDoc(statsRef, {
+        current_streak: newStreak,
+        total_sessions: (stats.total_sessions || 0) + 1,
+        last_upload_date: Timestamp.now(),
+        activity_log: [...(stats.activity_log || []), Timestamp.now()]
+      });
+    } catch (err: any) {
+      if (err.code === 'not-found' || !stats.total_sessions) {
+        try {
+          await setDoc(statsRef, {
+            current_streak: 1,
+            total_sessions: 1,
+            last_upload_date: Timestamp.now(),
+            activity_log: [Timestamp.now()]
+          });
+        } catch (setErr) {
+          handleFirestoreError(setErr, OperationType.CREATE, `user_stats/${userId}`);
+        }
+      } else {
+        handleFirestoreError(err, OperationType.UPDATE, `user_stats/${userId}`);
+      }
+    }
+  };
 
   useEffect(() => {
     if (user) {
@@ -242,6 +355,8 @@ export default function App() {
     const unsubscribeAnalyses = onSnapshot(qAnalyses, (snapshot) => {
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setAnalyses(docs);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'analyses');
     });
 
     // Listen for pets
@@ -254,6 +369,8 @@ export default function App() {
     const unsubscribePets = onSnapshot(qPets, (snapshot) => {
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setPets(docs);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'pets');
     });
 
     // Listen for reminders
@@ -266,12 +383,32 @@ export default function App() {
     const unsubscribeReminders = onSnapshot(qReminders, (snapshot) => {
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setReminders(docs);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'reminders');
+    });
+
+    // Listen for user stats
+    const unsubscribeStats = onSnapshot(doc(db, 'user_stats', user.uid), (snapshot) => {
+      if (snapshot.exists()) {
+        setUserStats(snapshot.data());
+      } else {
+        // Initialize stats if they don't exist
+        setUserStats({
+          current_streak: 0,
+          total_sessions: 0,
+          activity_log: [],
+          last_upload_date: null
+        });
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, `user_stats/${user.uid}`);
     });
 
     return () => {
       unsubscribeAnalyses();
       unsubscribePets();
       unsubscribeReminders();
+      unsubscribeStats();
     };
   }, [user]);
 
@@ -290,6 +427,8 @@ export default function App() {
     const unsubscribeMessages = onSnapshot(qMessages, (snapshot) => {
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setChatMessages(docs);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, `analyses/${selectedAnalysis.id}/messages`);
     });
 
     return () => unsubscribeMessages();
@@ -297,7 +436,16 @@ export default function App() {
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !user) return;
+    if (!file || !user || !userData) return;
+
+    // Check subscription limits
+    if (userData.subscriptionTier === 'free' && userData.analysesCount >= 10) {
+      setShowLimitModal({
+        type: 'analysis',
+        message: "You've reached the limit of 10 analyses for the Free tier. Upgrade to Pro for unlimited behavioral insights!"
+      });
+      return;
+    }
 
     // Commercial limit: 50MB max for raw upload
     if (file.size > 50 * 1024 * 1024) {
@@ -324,20 +472,41 @@ export default function App() {
       const response = await fetch('/api/process', {
         method: 'POST',
         body: formData,
+        credentials: 'include',
       });
 
+      const responseText = await response.text();
+      
+      // Check for AI Studio "Cookie check" page or other HTML interception
+      if (responseText.includes('<title>Cookie check</title>') || responseText.includes('Authenticate in new window')) {
+        throw new Error("Authentication session expired or cookies are blocked. Please open the app in a new tab or click the 'Authenticate' button if it appears.");
+      }
+
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error("[Process] API Error:", errorText);
+        console.error("[Process] API Error:", response.status, responseText);
+        
+        let errorMessage = `Server error (${response.status})`;
         try {
-          const errorJson = JSON.parse(errorText);
-          throw new Error(errorJson.error || "Media processing failed");
+          if (responseText.trim().startsWith('{')) {
+            const errorJson = JSON.parse(responseText);
+            errorMessage = errorJson.error || errorMessage;
+          } else if (responseText.includes('<!doctype') || responseText.includes('<html')) {
+            errorMessage = `Server returned HTML instead of JSON (Status ${response.status}). This usually means the backend route is missing or the server is starting up.`;
+          }
         } catch (e) {
-          throw new Error(`Server error (${response.status}). Please try again.`);
+          // Ignore parse errors
         }
+        throw new Error(errorMessage);
       }
       
-      const data = await response.json();
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (e) {
+        console.error("[Process] JSON Parse Error:", responseText);
+        throw new Error(`Invalid response from server (Status ${response.status}). Expected JSON but received something else.`);
+      }
+      
       const { base64, mimeType, mediaUrl } = data;
       console.log("[Process] Media processed and uploaded to:", mediaUrl);
       
@@ -441,17 +610,33 @@ export default function App() {
 
       // Step 4: Save results to Firestore
       console.log("[Firestore] Saving analysis record...");
-      await addDoc(collection(db, 'analyses'), {
-        userId: user.uid,
-        petId: selectedPetId || null,
-        petName: selectedPet?.name || 'My Pet',
-        mediaUrl,
-        mediaType: file.type.startsWith('video') ? 'video' : 'audio',
-        status: 'completed',
-        userQuestion: userQuestion || null,
-        result,
-        createdAt: Timestamp.now()
-      });
+      try {
+        await addDoc(collection(db, 'analyses'), {
+          userId: user.uid,
+          petId: selectedPetId || null,
+          petName: selectedPet?.name || 'My Pet',
+          mediaUrl,
+          mediaType: file.type.startsWith('video') ? 'video' : 'audio',
+          status: 'completed',
+          userQuestion: userQuestion || null,
+          result,
+          createdAt: Timestamp.now()
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.CREATE, 'analyses');
+      }
+
+      // Update user analysis count
+      try {
+        await updateDoc(doc(db, 'users', user.uid), {
+          analysesCount: (userData?.analysesCount || 0) + 1
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
+      }
+
+      // Update streak and stats
+      await updateStreak(user.uid);
 
       console.log("[Process] All steps completed successfully.");
       setUploadStatus('Complete!');
@@ -471,7 +656,19 @@ export default function App() {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMessage.trim() || !selectedAnalysis || isSendingMessage) return;
+    if (!newMessage.trim() || !selectedAnalysis || isSendingMessage || !user || !userData) return;
+
+    // Check subscription limits for chat
+    if (userData.subscriptionTier === 'free') {
+      const userMessagesCount = chatMessages.filter(m => m.role === 'user').length;
+      if (userMessagesCount >= 1) {
+        setShowLimitModal({
+          type: 'chat',
+          message: "Free tier users are limited to 1 follow-up question per analysis. Upgrade to Pro for unlimited expert guidance!"
+        });
+        return;
+      }
+    }
 
     setIsSendingMessage(true);
     const messageContent = newMessage.trim();
@@ -524,6 +721,20 @@ export default function App() {
       console.error("Failed to send message:", error);
     } finally {
       setIsSendingMessage(false);
+    }
+  };
+
+  const handleUpgrade = async () => {
+    if (!user) return;
+    try {
+      await updateDoc(doc(db, 'users', user.uid), {
+        subscriptionTier: 'pro'
+      });
+      setNotification({ message: 'Welcome to Pro! You now have unlimited access.', type: 'success' });
+      setShowLimitModal(null);
+    } catch (error) {
+      console.error("Upgrade failed:", error);
+      setNotification({ message: 'Upgrade failed. Please try again.', type: 'error' });
     }
   };
 
@@ -1129,10 +1340,14 @@ export default function App() {
               exit={{ opacity: 0, y: -10 }}
               className="space-y-8"
             >
+              {userStats && (
+                <StreakHeader streak={userStats.current_streak || 0} activityLog={userStats.activity_log || []} />
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <StatCard label="Total Analyses" value={analyses.length} icon={<Activity className="text-indigo-600" />} />
-                <StatCard label="Completed" value={analyses.filter(a => a.status === 'completed').length} icon={<CheckCircle2 className="text-emerald-600" />} />
-                <StatCard label="Pending" value={analyses.filter(a => a.status === 'pending').length} icon={<Loader2 className="text-amber-600" />} />
+                <StatCard label="Current Streak" value={userStats?.current_streak || 0} icon={<Flame className="text-amber-600" />} />
+                <StatCard label="Total Sessions" value={userStats?.total_sessions || 0} icon={<CheckCircle2 className="text-emerald-600" />} />
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1140,15 +1355,15 @@ export default function App() {
                   <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
                     <div className="flex justify-between items-center mb-8">
                       <div>
-                        <h3 className="text-xl font-bold text-slate-900">Behavioral Mood Trend</h3>
-                        <p className="text-sm text-slate-500">Emotional state tracking over time</p>
+                        <h3 className="text-xl font-bold text-slate-900">Training Consistency</h3>
+                        <p className="text-sm text-slate-500">Cumulative training sessions over time</p>
                       </div>
                       <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-widest">
-                        <div className="w-3 h-3 rounded-full bg-indigo-600"></div>
-                        Mood Level
+                        <div className="w-3 h-3 rounded-full bg-amber-500"></div>
+                        Sessions
                       </div>
                     </div>
-                    <MoodTrendChart analyses={analyses} />
+                    <ConsistencyChart activityLog={userStats?.activity_log || []} />
                   </div>
 
                   <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
@@ -1229,10 +1444,10 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="bg-indigo-600 p-8 rounded-3xl text-white shadow-xl shadow-indigo-100">
-                    <h3 className="text-lg font-bold mb-2">Pro Tip</h3>
-                    <p className="text-indigo-100 text-sm leading-relaxed">
-                      Regularly tracking your pet's mood helps identify early signs of health or stress issues.
+                  <div className="bg-amber-600 p-8 rounded-3xl text-white shadow-xl shadow-amber-100">
+                    <h3 className="text-lg font-bold mb-2">Trainer Status</h3>
+                    <p className="text-amber-100 text-sm leading-relaxed">
+                      Complete 30 sessions to become a "Certified Trainer" and unlock exclusive pet care insights!
                     </p>
                   </div>
                 </div>
@@ -1837,6 +2052,56 @@ export default function App() {
 
                   <hr className="border-slate-100" />
 
+                  {/* Subscription Section */}
+                  <section className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Subscription Plan</h4>
+                      <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                        userData?.subscriptionTier === 'pro' ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        {userData?.subscriptionTier || 'Free'} Tier
+                      </span>
+                    </div>
+                    
+                    <div className="p-6 rounded-3xl border border-slate-200 bg-white shadow-sm">
+                      <div className="flex items-start justify-between gap-6">
+                        <div className="space-y-2">
+                          <p className="font-bold text-slate-900">
+                            {userData?.subscriptionTier === 'pro' ? 'PawBehavior Pro' : 'PawBehavior Free'}
+                          </p>
+                          <p className="text-sm text-slate-500 leading-relaxed">
+                            {userData?.subscriptionTier === 'pro' 
+                              ? 'You have unlimited access to behavioral analyses and expert follow-up chats.' 
+                              : `You have used ${userData?.analysesCount || 0}/10 free analyses. Upgrade for unlimited access.`}
+                          </p>
+                        </div>
+                        {userData?.subscriptionTier !== 'pro' && (
+                          <button 
+                            onClick={handleUpgrade}
+                            className="shrink-0 px-6 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
+                          >
+                            Upgrade to Pro
+                          </button>
+                        )}
+                      </div>
+                      
+                      {userData?.subscriptionTier === 'free' && (
+                        <div className="mt-6 pt-6 border-t border-slate-50 grid grid-cols-2 gap-4">
+                          <div className="flex items-center gap-2 text-xs text-slate-500">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                            10 Analyses Total
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-slate-500">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                            1 Chat per Analysis
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+
+                  <hr className="border-slate-100" />
+
                   {/* Security Section */}
                   <section className="space-y-4">
                     <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Security</h4>
@@ -1996,6 +2261,44 @@ export default function App() {
                   className="flex-1 px-6 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-100"
                 >
                   Delete
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Limit Modal */}
+      <AnimatePresence>
+        {showLimitModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white rounded-[32px] p-8 max-w-md w-full shadow-2xl border border-slate-100"
+            >
+              <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center mb-6">
+                <AlertCircle className="w-8 h-8 text-indigo-600" />
+              </div>
+              <h3 className="text-2xl font-bold text-slate-900 mb-3">
+                {showLimitModal.type === 'analysis' ? 'Analysis Limit Reached' : 'Chat Limit Reached'}
+              </h3>
+              <p className="text-slate-500 mb-8 leading-relaxed">
+                {showLimitModal.message}
+              </p>
+              <div className="flex flex-col gap-3">
+                <button 
+                  onClick={handleUpgrade}
+                  className="w-full py-4 bg-indigo-600 text-white font-bold rounded-2xl hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 flex items-center justify-center gap-2"
+                >
+                  Upgrade to Pro
+                </button>
+                <button 
+                  onClick={() => setShowLimitModal(null)}
+                  className="w-full py-4 text-slate-500 font-bold hover:bg-slate-50 rounded-2xl transition-all"
+                >
+                  Maybe Later
                 </button>
               </div>
             </motion.div>

@@ -9,9 +9,11 @@
         "displayName": { "type": "string" },
         "photoURL": { "type": "string" },
         "role": { "type": "string", "enum": ["user", "admin"] },
+        "subscriptionTier": { "type": "string", "enum": ["free", "pro"] },
+        "analysesCount": { "type": "number" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["email", "role"]
+      "required": ["email", "role", "subscriptionTier"]
     },
     "Analysis": {
       "title": "Analysis",
@@ -73,6 +75,21 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "petId", "title", "type", "dueDate", "completed", "createdAt"]
+    },
+    "UserStats": {
+      "title": "UserStats",
+      "description": "Tracking user training consistency and streaks",
+      "type": "object",
+      "properties": {
+        "current_streak": { "type": "number" },
+        "last_upload_date": { "type": "string", "format": "date-time" },
+        "total_sessions": { "type": "number" },
+        "activity_log": { 
+          "type": "array",
+          "items": { "type": "string", "format": "date-time" }
+        }
+      },
+      "required": ["current_streak", "total_sessions"]
     }
   },
   "firestore": {
@@ -95,6 +112,10 @@
     "/reminders/{reminderId}": {
       "schema": "Reminder",
       "description": "Pet care reminders"
+    },
+    "/user_stats/{userId}": {
+      "schema": "UserStats",
+      "description": "User training statistics"
     }
   }
 }
