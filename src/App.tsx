@@ -27,6 +27,7 @@ import {
   signInWithGoogle, 
   logout, 
   db, 
+  auth,
   collection, 
   query, 
   where, 
@@ -40,7 +41,10 @@ import {
   getDownloadURL,
   addDoc,
   deleteDoc,
-  doc
+  doc,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  updateProfile
 } from './lib/firebase';
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
@@ -70,6 +74,13 @@ export default function App() {
     age: '',
     personality: ''
   });
+
+  // Auth states
+  const [authMode, setAuthMode] = useState<'login' | 'signup' | 'google'>('google');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [authError, setAuthError] = useState('');
 
   useEffect(() => {
     if (!user) return;
@@ -354,6 +365,21 @@ export default function App() {
     }
   };
 
+  const handleEmailAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    try {
+      if (authMode === 'signup') {
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        await updateProfile(userCredential.user, { displayName });
+      } else {
+        await signInWithEmailAndPassword(auth, email, password);
+      }
+    } catch (error: any) {
+      setAuthError(error.message);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -381,13 +407,108 @@ export default function App() {
             <p className="text-slate-500 text-lg">Professional AI behavior analysis for your beloved pets.</p>
           </div>
 
-          <button
-            onClick={signInWithGoogle}
-            className="w-full flex items-center justify-center gap-3 bg-white border border-slate-200 text-slate-700 px-6 py-4 rounded-2xl font-medium hover:bg-slate-50 transition-all shadow-sm hover:shadow-md active:scale-[0.98]"
-          >
-            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/layout/google.svg" className="w-5 h-5" alt="Google" />
-            Sign in with Google
-          </button>
+          {authMode === 'google' ? (
+            <div className="space-y-4">
+              <button
+                onClick={signInWithGoogle}
+                className="w-full flex items-center justify-center gap-3 bg-white border border-slate-200 text-slate-700 px-6 py-4 rounded-2xl font-medium hover:bg-slate-50 transition-all shadow-sm hover:shadow-md active:scale-[0.98]"
+              >
+                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/layout/google.svg" className="w-5 h-5" alt="Google" />
+                Sign in with Google
+              </button>
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-slate-200"></span>
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-white px-2 text-slate-400">Or continue with</span>
+                </div>
+              </div>
+              <button
+                onClick={() => setAuthMode('login')}
+                className="w-full flex items-center justify-center gap-3 bg-slate-900 text-white px-6 py-4 rounded-2xl font-medium hover:bg-slate-800 transition-all shadow-sm hover:shadow-md active:scale-[0.98]"
+              >
+                Sign in with Email
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleEmailAuth} className="space-y-4 text-left">
+              {authMode === 'signup' && (
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">Full Name</label>
+                  <input 
+                    required
+                    type="text"
+                    value={displayName}
+                    onChange={e => setDisplayName(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    placeholder="John Doe"
+                  />
+                </div>
+              )}
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500 uppercase">Email Address</label>
+                <input 
+                  required
+                  type="email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  placeholder="name@example.com"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500 uppercase">Password</label>
+                <input 
+                  required
+                  type="password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  placeholder="••••••••"
+                />
+              </div>
+
+              {authError && (
+                <div className="p-3 rounded-lg bg-red-50 text-red-600 text-sm flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4" />
+                  {authError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="w-full bg-indigo-600 text-white px-6 py-4 rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 active:scale-[0.98]"
+              >
+                {authMode === 'login' ? 'Sign In' : 'Create Account'}
+              </button>
+
+              <div className="text-center space-y-4">
+                <button
+                  type="button"
+                  onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}
+                  className="text-indigo-600 text-sm font-medium hover:underline"
+                >
+                  {authMode === 'login' ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
+                </button>
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t border-slate-200"></span>
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-white px-2 text-slate-400">Or</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAuthMode('google')}
+                  className="text-slate-500 text-sm font-medium hover:underline"
+                >
+                  Back to Google Sign In
+                </button>
+              </div>
+            </form>
+          )}
           
           <p className="text-xs text-slate-400">
             By signing in, you agree to our Terms of Service and Privacy Policy.
@@ -437,9 +558,15 @@ export default function App() {
 
         <div className="p-4 border-t border-slate-100">
           <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 mb-4">
-            <img src={user.photoURL || ''} className="w-10 h-10 rounded-full border-2 border-white shadow-sm" alt="" />
+            {user.photoURL ? (
+              <img src={user.photoURL} className="w-10 h-10 rounded-full border-2 border-white shadow-sm" alt="" />
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center border-2 border-white shadow-sm">
+                <UserIcon className="w-5 h-5 text-indigo-600" />
+              </div>
+            )}
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-slate-900 truncate">{user.displayName}</p>
+              <p className="text-sm font-semibold text-slate-900 truncate">{user.displayName || 'User'}</p>
               <p className="text-xs text-slate-500 truncate">{user.email}</p>
             </div>
           </div>
@@ -461,7 +588,7 @@ export default function App() {
               {selectedAnalysis ? 'Analysis Report' : activeTab === 'dashboard' ? 'Dashboard' : activeTab === 'upload' ? 'New Analysis' : 'Report History'}
             </h2>
             <p className="text-slate-500 mt-1">
-              {selectedAnalysis ? `Report for ${selectedAnalysis.petName || 'My Pet'}` : `Welcome back, ${user.displayName?.split(' ')[0]}`}
+              {selectedAnalysis ? `Report for ${selectedAnalysis.petName || 'My Pet'}` : `Welcome back, ${(user.displayName || 'User').split(' ')[0]}`}
             </p>
           </div>
           {activeTab === 'dashboard' && !selectedAnalysis && (
