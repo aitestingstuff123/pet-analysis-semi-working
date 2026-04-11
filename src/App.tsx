@@ -44,7 +44,9 @@ import {
   doc,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
-  updateProfile
+  updateProfile,
+  handleFirestoreError,
+  OperationType
 } from './lib/firebase';
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
@@ -81,6 +83,26 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [authError, setAuthError] = useState('');
+
+  // Confirmation state
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{
+    type: 'pet' | 'analysis';
+    id: string;
+    name: string;
+  } | null>(null);
+
+  // Notification state
+  const [notification, setNotification] = useState<{
+    message: string;
+    type: 'success' | 'error';
+  } | null>(null);
+
+  useEffect(() => {
+    if (notification) {
+      const timer = setTimeout(() => setNotification(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [notification]);
 
   useEffect(() => {
     if (!user) return;
@@ -344,24 +366,35 @@ export default function App() {
   };
 
   const handleDeletePet = async (petId: string) => {
-    if (!window.confirm("Are you sure you want to delete this pet profile?")) return;
+    console.log(`[Firestore] Attempting to delete pet: ${petId}`);
     try {
       await deleteDoc(doc(db, 'pets', petId));
+      console.log(`[Firestore] Pet deleted successfully: ${petId}`);
+      setNotification({ message: 'Pet profile deleted successfully', type: 'success' });
     } catch (error) {
       console.error("Failed to delete pet:", error);
+      setNotification({ message: 'Failed to delete pet profile. Please check your permissions.', type: 'error' });
+      handleFirestoreError(error, OperationType.DELETE, `pets/${petId}`);
+    } finally {
+      setDeleteConfirmation(null);
     }
   };
 
-  const handleDeleteAnalysis = async (e: React.MouseEvent, analysisId: string) => {
-    e.stopPropagation();
-    if (!window.confirm("Are you sure you want to delete this analysis?")) return;
+  const handleDeleteAnalysis = async (analysisId: string) => {
+    console.log(`[Firestore] Attempting to delete analysis: ${analysisId}`);
     try {
       await deleteDoc(doc(db, 'analyses', analysisId));
+      console.log(`[Firestore] Analysis deleted successfully: ${analysisId}`);
+      setNotification({ message: 'Analysis deleted successfully', type: 'success' });
       if (selectedAnalysis?.id === analysisId) {
         setSelectedAnalysis(null);
       }
     } catch (error) {
       console.error("Failed to delete analysis:", error);
+      setNotification({ message: 'Failed to delete analysis. Please check your permissions.', type: 'error' });
+      handleFirestoreError(error, OperationType.DELETE, `analyses/${analysisId}`);
+    } finally {
+      setDeleteConfirmation(null);
     }
   };
 
@@ -825,7 +858,14 @@ export default function App() {
                           {analysis.status}
                         </span>
                         <button 
-                          onClick={(e) => handleDeleteAnalysis(e, analysis.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteConfirmation({ 
+                              type: 'analysis', 
+                              id: analysis.id, 
+                              name: `${analysis.petName || 'Pet'}'s analysis` 
+                            });
+                          }}
                           className="p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -897,7 +937,14 @@ export default function App() {
                                   {analysis.status}
                                 </span>
                                 <button 
-                                  onClick={(e) => handleDeleteAnalysis(e, analysis.id)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDeleteConfirmation({ 
+                                      type: 'analysis', 
+                                      id: analysis.id, 
+                                      name: 'this analysis' 
+                                    });
+                                  }}
                                   className="p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
                                 >
                                   <Trash2 className="w-4 h-4" />
@@ -1017,7 +1064,11 @@ export default function App() {
                         <button 
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleDeletePet(pet.id);
+                            setDeleteConfirmation({ 
+                              type: 'pet', 
+                              id: pet.id, 
+                              name: pet.name 
+                            });
                           }}
                           className="absolute top-4 right-4 p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
                         >
@@ -1091,7 +1142,14 @@ export default function App() {
                         {analysis.status}
                       </span>
                       <button 
-                        onClick={(e) => handleDeleteAnalysis(e, analysis.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteConfirmation({ 
+                            type: 'analysis', 
+                            id: analysis.id, 
+                            name: `${analysis.petName || 'Pet'}'s analysis` 
+                          });
+                        }}
                         className="p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -1188,6 +1246,67 @@ export default function App() {
           )}
         </AnimatePresence>
       </main>
+
+      {/* Custom Confirmation Modal */}
+      <AnimatePresence>
+        {deleteConfirmation && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl border border-slate-100"
+            >
+              <div className="w-16 h-16 bg-red-50 rounded-2xl flex items-center justify-center mb-6">
+                <Trash2 className="w-8 h-8 text-red-600" />
+              </div>
+              <h3 className="text-2xl font-bold text-slate-900 mb-2">Delete {deleteConfirmation.type}?</h3>
+              <p className="text-slate-500 mb-8 leading-relaxed">
+                Are you sure you want to delete <span className="font-bold text-slate-900">"{deleteConfirmation.name}"</span>? This action cannot be undone.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeleteConfirmation(null)}
+                  className="flex-1 px-6 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (deleteConfirmation.type === 'pet') {
+                      handleDeletePet(deleteConfirmation.id);
+                    } else {
+                      handleDeleteAnalysis(deleteConfirmation.id);
+                    }
+                  }}
+                  className="flex-1 px-6 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-100"
+                >
+                  Delete
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Custom Notification Toast */}
+      <AnimatePresence>
+        {notification && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, x: '-50%' }}
+            animate={{ opacity: 1, y: 0, x: '-50%' }}
+            exit={{ opacity: 0, y: 50, x: '-50%' }}
+            className={`fixed bottom-8 left-1/2 z-[110] px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 min-w-[320px] border ${
+              notification.type === 'success' 
+                ? 'bg-emerald-600 text-white border-emerald-500' 
+                : 'bg-red-600 text-white border-red-500'
+            }`}
+          >
+            {notification.type === 'success' ? <CheckCircle2 className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
+            <p className="font-bold text-sm">{notification.message}</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
