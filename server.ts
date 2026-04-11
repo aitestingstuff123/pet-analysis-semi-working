@@ -35,6 +35,18 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
+
+  // API Request Logging
+  app.use("/api", (req, res, next) => {
+    console.log(`[Server] API Request: ${req.method} ${req.url}`);
+    next();
+  });
+
+  // Health Check
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
 
   // Ensure uploads directory exists
   if (!fs.existsSync("uploads")) {
@@ -42,12 +54,28 @@ async function startServer() {
   }
 
   // API Routes
-  app.post("/api/process", upload.single("media"), async (req: MulterRequest, res) => {
+  app.post("/api/process", (req, res, next) => {
+    upload.single("media")(req, res, (err) => {
+      if (err) {
+        console.error("[Server] Multer Error:", err);
+        return res.status(400).json({ 
+          error: err instanceof multer.MulterError ? `File upload error: ${err.message}` : "Failed to upload file" 
+        });
+      }
+      next();
+    });
+  }, async (req: MulterRequest, res) => {
+    console.log(`[Server] Received upload request: ${req.file?.originalname} (${req.file?.mimetype})`);
+    console.log(`[Server] Request Body Keys:`, Object.keys(req.body));
+    console.log(`[Server] User ID:`, req.body.userId);
+    console.log(`[Server] User Question Length:`, req.body.userQuestion?.length || 0);
+    
     let tempPath = req.file?.path;
     let compressedPath = "";
 
     try {
       if (!req.file) {
+        console.error("[Server] No file received in request");
         return res.status(400).json({ error: "No media file uploaded" });
       }
 
@@ -56,12 +84,14 @@ async function startServer() {
       const isAudio = req.file.mimetype.startsWith("audio/");
       
       if (!isVideo && !isAudio) {
+        console.warn(`[Server] Rejected invalid file type: ${req.file.mimetype}`);
         if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
         return res.status(400).json({ error: "Invalid file type. Only video and audio are allowed." });
       }
 
       // 1. Compression using FFmpeg (Optimized for Cost/Tokens)
       if (isVideo) {
+        console.log("[Server] Starting video compression...");
         compressedPath = `uploads/compressed_${req.file.filename}.mp4`;
         await new Promise((resolve, reject) => {
           ffmpeg(tempPath)
@@ -77,8 +107,16 @@ async function startServer() {
             ])
             .save(compressedPath)
             .on("end", resolve)
-            .on("error", reject);
+            .on("error", (err) => {
+              console.error("[Server] FFmpeg Error:", err);
+              reject(err);
+            });
         });
+        console.log("[Server] Compression complete");
+      }
+
+      if (!fs.existsSync(compressedPath || tempPath)) {
+        throw new Error("Media file disappeared after processing");
       }
 
       const mediaBuffer = fs.readFileSync(compressedPath || tempPath);
@@ -103,13 +141,26 @@ async function startServer() {
         mediaUrl: mediaUrl
       });
     } catch (error: any) {
-      console.error("Processing error:", error);
-      res.status(500).json({ error: "An error occurred during media processing." });
+      console.error("[Server] Processing error:", error);
+      res.status(500).json({ 
+        error: "Media processing failed", 
+        details: error.message 
+      });
     } finally {
       // Cleanup temp files
-      if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
-      if (compressedPath && fs.existsSync(compressedPath)) fs.unlinkSync(compressedPath);
+      try {
+        if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+        if (compressedPath && fs.existsSync(compressedPath)) fs.unlinkSync(compressedPath);
+      } catch (cleanupError) {
+        console.error("[Server] Cleanup error:", cleanupError);
+      }
     }
+  });
+
+  // Catch-all for API routes to prevent falling through to SPA middleware
+  app.all("/api/*", (req, res) => {
+    console.warn(`[Server] API 404: ${req.method} ${req.url}`);
+    res.status(404).json({ error: `API endpoint ${req.method} ${req.url} not found` });
   });
 
   // Vite middleware for development
@@ -127,8 +178,18 @@ async function startServer() {
     });
   }
 
+  // Global Error Handler to ensure JSON responses
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error("[Server] Global Error:", err);
+    res.status(500).json({ 
+      error: "Internal Server Error", 
+      message: err.message,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
+  });
+
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
 }
 
