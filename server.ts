@@ -4,7 +4,6 @@ import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
 import multer from "multer";
-import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import ffmpeg from "fluent-ffmpeg";
 import ffmpegInstaller from "ffmpeg-static";
@@ -18,7 +17,6 @@ if (ffmpegInstaller) {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 const upload = multer({ dest: "uploads/" });
 
 interface MulterRequest extends express.Request {
@@ -37,7 +35,7 @@ async function startServer() {
   }
 
   // API Routes
-  app.post("/api/analyze", upload.single("media"), async (req: MulterRequest, res) => {
+  app.post("/api/compress", upload.single("media"), async (req: MulterRequest, res) => {
     let tempPath = req.file?.path;
     let compressedPath = "";
 
@@ -46,7 +44,7 @@ async function startServer() {
         return res.status(400).json({ error: "No media file uploaded" });
       }
 
-      // Compression using FFmpeg (fluent-ffmpeg wrapper)
+      // Compression using FFmpeg
       if (req.file.mimetype.startsWith("video")) {
         compressedPath = `uploads/compressed_${req.file.filename}.mp4`;
         await new Promise((resolve, reject) => {
@@ -68,42 +66,12 @@ async function startServer() {
       const mediaBuffer = fs.readFileSync(compressedPath || tempPath);
       const mimeType = compressedPath ? "video/mp4" : req.file.mimetype;
 
-      const prompt = `Analyze this pet behavior video/audio. 
-      Provide a detailed report including:
-      1. Observations (list of objects with 'event' and 'meaning' keys)
-      2. Emotional state (string)
-      3. Recommended action steps (list of strings)
-      Format the response as a clean JSON object.`;
-
-      const result = await genAI.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: {
-          parts: [
-            {
-              inlineData: {
-                data: mediaBuffer.toString("base64"),
-                mimeType: mimeType,
-              },
-            },
-            { text: prompt }
-          ]
-        }
+      res.json({
+        base64: mediaBuffer.toString("base64"),
+        mimeType: mimeType
       });
-
-      const text = result.text || "";
-      
-      // Attempt to parse JSON from response
-      let analysisResult;
-      try {
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        analysisResult = jsonMatch ? JSON.parse(jsonMatch[0]) : { raw: text };
-      } catch (e) {
-        analysisResult = { raw: text };
-      }
-
-      res.json(analysisResult);
     } catch (error: any) {
-      console.error("Analysis error:", error);
+      console.error("Compression error:", error);
       res.status(500).json({ error: error.message });
     } finally {
       // Cleanup temp files

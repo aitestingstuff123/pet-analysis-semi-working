@@ -15,8 +15,11 @@ import {
   FileText,
   User as UserIcon
 } from 'lucide-react';
+import { GoogleGenAI } from '@google/genai';
 import { useAuth } from './lib/AuthContext';
 import { signInWithGoogle, logout, db, collection, query, where, orderBy, onSnapshot, Timestamp } from './lib/firebase';
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 export default function App() {
   const { user, loading, isAdmin } = useAuth();
@@ -54,19 +57,54 @@ export default function App() {
     formData.append('media', file);
 
     try {
-      // In a real app, we'd upload to Firebase Storage first
-      // For this demo, we send directly to server
+      // Step 1: Compress on backend
       setUploadProgress(30);
       
-      const response = await fetch('/api/analyze', {
+      const compressResponse = await fetch('/api/compress', {
         method: 'POST',
         body: formData,
       });
 
-      setUploadProgress(80);
-      const result = await response.json();
+      if (!compressResponse.ok) throw new Error("Compression failed");
+      
+      const { base64, mimeType } = await compressResponse.json();
+      setUploadProgress(60);
 
-      // Save to Firestore directly
+      // Step 2: Analyze with Gemini on frontend
+      const prompt = `Analyze this pet behavior video/audio. 
+      Provide a detailed report including:
+      1. Observations (list of objects with 'event' and 'meaning' keys)
+      2. Emotional state (string)
+      3. Recommended action steps (list of strings)
+      Format the response as a clean JSON object.`;
+
+      const geminiResult = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                data: base64,
+                mimeType: mimeType,
+              },
+            },
+            { text: prompt }
+          ]
+        }
+      });
+
+      const text = geminiResult.text || "";
+      let result;
+      try {
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        result = jsonMatch ? JSON.parse(jsonMatch[0]) : { raw: text };
+      } catch (e) {
+        result = { raw: text };
+      }
+
+      setUploadProgress(90);
+
+      // Step 3: Save to Firestore directly
       const { addDoc, collection, Timestamp } = await import('./lib/firebase');
       await addDoc(collection(db, 'analyses'), {
         userId: user.uid,
