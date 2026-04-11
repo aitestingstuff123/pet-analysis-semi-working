@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { auth, onAuthStateChanged, User, db, doc, getDoc, setDoc, Timestamp } from './firebase';
+import { auth, onAuthStateChanged, User, db, doc, getDoc, setDoc, Timestamp, onSnapshot } from './firebase';
 
 interface AuthContextType {
   user: User | null;
@@ -17,15 +17,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    let unsubscribeSnapshot: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       
+      if (unsubscribeSnapshot) {
+        unsubscribeSnapshot();
+        unsubscribeSnapshot = null;
+      }
+
       if (currentUser) {
-        try {
-          const userRef = doc(db, 'users', currentUser.uid);
-          const userSnap = await getDoc(userRef);
-          
-          if (!userSnap.exists()) {
+        const userRef = doc(db, 'users', currentUser.uid);
+        
+        // Use onSnapshot for real-time updates (important for rewards/limits)
+        unsubscribeSnapshot = onSnapshot(userRef, (docSnap) => {
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            setUserData(data);
+            setIsAdmin(data.role === 'admin');
+            setLoading(false);
+          } else {
+            // Document doesn't exist yet, create it
             const initialData = {
               email: currentUser.email,
               displayName: currentUser.displayName,
@@ -33,27 +46,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               role: 'user',
               subscriptionTier: 'free',
               analysesCount: 0,
+              bonusAnalyses: 0,
+              bonusChats: 0,
               createdAt: Timestamp.now()
             };
-            await setDoc(userRef, initialData);
-            setUserData(initialData);
-          } else {
-            const data = userSnap.data();
-            setUserData(data);
-            setIsAdmin(data.role === 'admin');
+            setDoc(userRef, initialData).catch(err => {
+              console.error("Error creating user doc:", err);
+            });
           }
-        } catch (error) {
-          console.error("Error syncing user:", error);
-        }
+        }, (error) => {
+          console.error("User snapshot error:", error);
+          setLoading(false);
+        });
       } else {
         setUserData(null);
         setIsAdmin(false);
+        setLoading(false);
       }
-      
-      setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeSnapshot) unsubscribeSnapshot();
+    };
   }, []);
 
   return (

@@ -41,6 +41,7 @@ import {
 } from 'lucide-react';
 import { GoogleGenAI, Type } from '@google/genai';
 import { useAuth } from './lib/AuthContext';
+import { rewardedAdService } from './lib/RewardedAdService';
 
 const ConsistencyChart = ({ activityLog }: { activityLog: any[] }) => {
   // activityLog is an array of timestamps
@@ -238,7 +239,7 @@ export default function App() {
 
   // Confirmation state
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
-    type: 'pet' | 'analysis';
+    type: 'pet' | 'analysis' | 'reminder';
     id: string;
     name: string;
   } | null>(null);
@@ -252,6 +253,7 @@ export default function App() {
   // Reminders state
   const [reminders, setReminders] = useState<any[]>([]);
   const [isAddingReminder, setIsAddingReminder] = useState(false);
+  const [editingReminderId, setEditingReminderId] = useState<string | null>(null);
   const [newReminder, setNewReminder] = useState({
     petId: '',
     title: '',
@@ -440,16 +442,24 @@ export default function App() {
     if (!file || !user || !userData) return;
 
     // Check subscription limits
-    if (userData.subscriptionTier === 'free' && userData.analysesCount >= 3) {
-      setShowLimitModal({
-        type: 'analysis',
-        message: "You've reached the limit of 3 analyses for the Free tier. Upgrade to Pro for unlimited behavioral insights!"
-      });
-      return;
+    const freeLimit = 3;
+    if (userData.subscriptionTier === 'free' && userData.analysesCount >= freeLimit) {
+      if ((userData.bonusAnalyses || 0) > 0) {
+        // Bonus available, will be consumed upon successful analysis
+        console.log("[Limits] Using bonus analysis. Remaining:", userData.bonusAnalyses - 1);
+      } else {
+        e.target.value = ''; // Clear input to allow re-selection of the same file
+        setShowLimitModal({
+          type: 'analysis',
+          message: `You've reached the free limit of ${freeLimit} analyses. Upgrade to Pro or watch an ad for +1 analysis!`
+        });
+        return;
+      }
     }
 
     // Commercial limit: 50MB max for raw upload
     if (file.size > 50 * 1024 * 1024) {
+      e.target.value = ''; // Clear input
       alert("File is too large. Please upload a video smaller than 50MB.");
       return;
     }
@@ -631,11 +641,21 @@ export default function App() {
         handleFirestoreError(error, OperationType.CREATE, 'analyses');
       }
 
-      // Update user analysis count
+      // Update user analysis count and consume bonus if used
       try {
-        await updateDoc(doc(db, 'users', user.uid), {
+        const userRef = doc(db, 'users', user.uid);
+        const updates: any = {
           analysesCount: (userData?.analysesCount || 0) + 1
-        });
+        };
+        
+        // If we were over the free limit, consume a bonus
+        if (userData.subscriptionTier === 'free' && userData.analysesCount >= 3) {
+          if ((userData.bonusAnalyses || 0) > 0) {
+            updates.bonusAnalyses = userData.bonusAnalyses - 1;
+          }
+        }
+        
+        await updateDoc(userRef, updates);
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
       }
@@ -648,6 +668,11 @@ export default function App() {
       setUploadProgress(100);
       setUserQuestion('');
       setSelectedPetId('');
+      
+      // Clear the file input
+      const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+      if (fileInput) fileInput.value = '';
+
       setTimeout(() => {
         setIsUploading(false);
         setActiveTab('dashboard');
@@ -666,12 +691,25 @@ export default function App() {
     // Check subscription limits for chat
     if (userData.subscriptionTier === 'free') {
       const userMessagesCount = chatMessages.filter(m => m.role === 'user').length;
-      if (userMessagesCount >= 1) {
-        setShowLimitModal({
-          type: 'chat',
-          message: "Free tier users are limited to 1 follow-up question per analysis. Upgrade to Pro for unlimited expert guidance!"
-        });
-        return;
+      const freeLimit = 1;
+      
+      if (userMessagesCount >= freeLimit) {
+        if ((userData.bonusChats || 0) > 0) {
+          // Consume a bonus chat
+          try {
+            await updateDoc(doc(db, 'users', user.uid), {
+              bonusChats: userData.bonusChats - 1
+            });
+          } catch (error) {
+            console.error("Failed to consume bonus chat:", error);
+          }
+        } else {
+          setShowLimitModal({
+            type: 'chat',
+            message: `Free tier users are limited to ${freeLimit} follow-up question(s) per analysis. Upgrade to Pro or watch an ad for +1 chat!`
+          });
+          return;
+        }
       }
     }
 
@@ -741,6 +779,77 @@ export default function App() {
       console.error("Upgrade failed:", error);
       setNotification({ message: 'Upgrade failed. Please try again.', type: 'error' });
     }
+  };
+
+  const [isWatchingAd, setIsWatchingAd] = useState(false);
+  const handleWatchAd = (type: 'analysis' | 'chat') => {
+    if (!user || !userData) return;
+
+    // Check daily limit for analysis ads
+    if (type === 'analysis') {
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const lastAdDate = userData.lastAdAnalysisDate ? new Date(userData.lastAdAnalysisDate.toMillis()) : null;
+      const lastAdDay = lastAdDate ? new Date(lastAdDate.getFullYear(), lastAdDate.getMonth(), lastAdDate.getDate()).getTime() : 0;
+      
+      const currentDailyCount = (today > lastAdDay) ? 0 : (userData.dailyAdAnalysesCount || 0);
+      
+      if (currentDailyCount >= 3) {
+        setNotification({ message: 'Daily limit for free analysis ads reached (3/3). Reset at midnight.', type: 'error' });
+        return;
+      }
+    }
+
+    setIsWatchingAd(true);
+    
+    rewardedAdService.loadAd('ca-app-pub-3940256099942544/5224354917', {
+      onAdLoaded: () => {
+        rewardedAdService.showAd({
+          onUserEarnedReward: async (reward) => {
+            console.log("[Reward] User earned reward:", reward);
+            try {
+              const userRef = doc(db, 'users', user.uid);
+              const now = Timestamp.now();
+              const nowDate = new Date();
+              const today = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
+              const lastAdDate = userData.lastAdAnalysisDate ? new Date(userData.lastAdAnalysisDate.toMillis()) : null;
+              const lastAdDay = lastAdDate ? new Date(lastAdDate.getFullYear(), lastAdDate.getMonth(), lastAdDate.getDate()).getTime() : 0;
+
+              if (type === 'analysis') {
+                const currentDailyCount = (today > lastAdDay) ? 0 : (userData.dailyAdAnalysesCount || 0);
+                await updateDoc(userRef, {
+                  bonusAnalyses: (userData.bonusAnalyses || 0) + 1,
+                  dailyAdAnalysesCount: currentDailyCount + 1,
+                  lastAdAnalysisDate: now
+                });
+                setNotification({ message: `Reward earned! +1 Analysis granted (${currentDailyCount + 1}/3 today).`, type: 'success' });
+              } else if (type === 'chat') {
+                await updateDoc(userRef, {
+                  bonusChats: (userData.bonusChats || 0) + 1
+                });
+                setNotification({ message: 'Reward earned! +1 Chat granted.', type: 'success' });
+              }
+              setShowLimitModal(null);
+            } catch (error) {
+              console.error("Failed to grant reward:", error);
+              setNotification({ message: 'Failed to grant reward. Please try again.', type: 'error' });
+            }
+          },
+          onAdClosed: () => {
+            setIsWatchingAd(false);
+          },
+          onAdFailedToLoad: (err) => {
+            setIsWatchingAd(false);
+            setNotification({ message: 'Failed to load ad. Please try again later.', type: 'error' });
+          }
+        });
+      },
+      onAdFailedToLoad: (err) => {
+        setIsWatchingAd(false);
+        setNotification({ message: 'Ad failed to load. Please try again.', type: 'error' });
+      },
+      onUserEarnedReward: () => {} // Handled in showAd
+    });
   };
 
   const handleSavePet = async (e: React.FormEvent) => {
@@ -828,6 +937,21 @@ export default function App() {
     }
   };
 
+  const handleDeleteReminder = async (reminderId: string) => {
+    console.log(`[Firestore] Attempting to delete reminder: ${reminderId}`);
+    try {
+      await deleteDoc(doc(db, 'reminders', reminderId));
+      console.log(`[Firestore] Reminder deleted successfully: ${reminderId}`);
+      setNotification({ message: 'Reminder deleted successfully', type: 'success' });
+    } catch (error) {
+      console.error("Failed to delete reminder:", error);
+      setNotification({ message: 'Failed to delete reminder. Please check your permissions.', type: 'error' });
+      handleFirestoreError(error, OperationType.DELETE, `reminders/${reminderId}`);
+    } finally {
+      setDeleteConfirmation(null);
+    }
+  };
+
   const handleGoogleSignIn = async () => {
     if (isLoggingIn) return;
     setIsLoggingIn(true);
@@ -897,13 +1021,25 @@ export default function App() {
     const selectedPet = pets.find(p => p.id === newReminder.petId);
 
     try {
-      await addDoc(collection(db, 'reminders'), {
-        userId: user.uid,
-        petName: selectedPet?.name || 'Pet',
-        ...newReminder,
-        createdAt: Timestamp.now()
-      });
+      if (editingReminderId) {
+        await updateDoc(doc(db, 'reminders', editingReminderId), {
+          petName: selectedPet?.name || 'Pet',
+          ...newReminder,
+          updatedAt: Timestamp.now()
+        });
+        setNotification({ message: 'Reminder updated successfully!', type: 'success' });
+      } else {
+        await addDoc(collection(db, 'reminders'), {
+          userId: user.uid,
+          petName: selectedPet?.name || 'Pet',
+          ...newReminder,
+          createdAt: Timestamp.now()
+        });
+        setNotification({ message: 'Reminder added successfully!', type: 'success' });
+      }
+      
       setIsAddingReminder(false);
+      setEditingReminderId(null);
       setNewReminder({
         petId: '',
         title: '',
@@ -911,10 +1047,9 @@ export default function App() {
         dueDate: '',
         completed: false
       });
-      setNotification({ message: 'Reminder added successfully!', type: 'success' });
     } catch (error) {
-      console.error("Failed to add reminder:", error);
-      setNotification({ message: 'Failed to add reminder', type: 'error' });
+      console.error("Failed to save reminder:", error);
+      setNotification({ message: `Failed to ${editingReminderId ? 'update' : 'add'} reminder`, type: 'error' });
     }
   };
 
@@ -925,15 +1060,6 @@ export default function App() {
       });
     } catch (error) {
       console.error("Failed to update reminder:", error);
-    }
-  };
-
-  const handleDeleteReminder = async (reminderId: string) => {
-    try {
-      await deleteDoc(doc(db, 'reminders', reminderId));
-      setNotification({ message: 'Reminder deleted', type: 'success' });
-    } catch (error) {
-      console.error("Failed to delete reminder:", error);
     }
   };
 
@@ -1934,7 +2060,7 @@ export default function App() {
 
               {isAddingReminder && (
                 <div className="bg-white p-6 rounded-2xl border border-indigo-100 shadow-xl shadow-indigo-50 animate-in fade-in slide-in-from-top-4 duration-300">
-                  <h4 className="text-lg font-bold text-slate-900 mb-4">New Reminder</h4>
+                  <h4 className="text-lg font-bold text-slate-900 mb-4">{editingReminderId ? 'Edit Reminder' : 'New Reminder'}</h4>
                   <form onSubmit={handleSaveReminder} className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1">
                       <label className="text-xs font-bold text-slate-500 uppercase">Pet</label>
@@ -1987,7 +2113,10 @@ export default function App() {
                     <div className="md:col-span-2 flex justify-end gap-3 mt-2">
                       <button 
                         type="button"
-                        onClick={() => setIsAddingReminder(false)}
+                        onClick={() => {
+                          setIsAddingReminder(false);
+                          setEditingReminderId(null);
+                        }}
                         className="px-4 py-2 text-slate-500 font-medium hover:bg-slate-50 rounded-lg transition-colors"
                       >
                         Cancel
@@ -1996,7 +2125,7 @@ export default function App() {
                         type="submit"
                         className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition-colors"
                       >
-                        Save Reminder
+                        {editingReminderId ? 'Update Reminder' : 'Save Reminder'}
                       </button>
                     </div>
                   </form>
@@ -2011,12 +2140,30 @@ export default function App() {
                       reminder.completed ? 'border-slate-100 opacity-60' : 'border-slate-200 shadow-sm hover:shadow-md'
                     }`}
                   >
-                    <button 
-                      onClick={() => handleDeleteReminder(reminder.id)}
-                      className="absolute top-4 right-4 p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                      <button 
+                        onClick={() => {
+                          setEditingReminderId(reminder.id);
+                          setNewReminder({
+                            petId: reminder.petId,
+                            title: reminder.title,
+                            type: reminder.type,
+                            dueDate: reminder.dueDate,
+                            completed: reminder.completed
+                          });
+                          setIsAddingReminder(true);
+                        }}
+                        className="p-2 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={() => setDeleteConfirmation({ type: 'reminder', id: reminder.id, name: reminder.title })}
+                        className="p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                     <div className="flex items-center gap-4 mb-4">
                       <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
                         reminder.completed ? 'bg-slate-100 text-slate-400' :
@@ -2308,8 +2455,10 @@ export default function App() {
                   onClick={() => {
                     if (deleteConfirmation.type === 'pet') {
                       handleDeletePet(deleteConfirmation.id);
-                    } else {
+                    } else if (deleteConfirmation.type === 'analysis') {
                       handleDeleteAnalysis(deleteConfirmation.id);
+                    } else if (deleteConfirmation.type === 'reminder') {
+                      handleDeleteReminder(deleteConfirmation.id);
                     }
                   }}
                   className="flex-1 px-6 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-100"
@@ -2342,6 +2491,40 @@ export default function App() {
                 {showLimitModal.message}
               </p>
               <div className="flex flex-col gap-3">
+                {(() => {
+                  const now = new Date();
+                  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+                  const lastAdDate = userData?.lastAdAnalysisDate ? new Date(userData.lastAdAnalysisDate.toMillis()) : null;
+                  const lastAdDay = lastAdDate ? new Date(lastAdDate.getFullYear(), lastAdDate.getMonth(), lastAdDate.getDate()).getTime() : 0;
+                  const currentDailyCount = (today > lastAdDay) ? 0 : (userData?.dailyAdAnalysesCount || 0);
+                  const isAnalysisLimitReached = showLimitModal.type === 'analysis' && currentDailyCount >= 3;
+
+                  return (
+                    <>
+                      <button 
+                        onClick={() => handleWatchAd(showLimitModal.type as 'analysis' | 'chat')}
+                        disabled={isWatchingAd || isAnalysisLimitReached}
+                        className={`w-full py-4 text-white font-bold rounded-2xl transition-all shadow-xl flex items-center justify-center gap-2 disabled:opacity-50 ${
+                          isAnalysisLimitReached ? 'bg-slate-400 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-100'
+                        }`}
+                      >
+                        {isWatchingAd ? (
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                        ) : (
+                          <Play className="w-5 h-5" />
+                        )}
+                        {isWatchingAd ? 'Watching Ad...' : 
+                         isAnalysisLimitReached ? 'Daily Ad Limit Reached (3/3)' :
+                         `Watch Ad for +1 ${showLimitModal.type === 'analysis' ? 'Analysis' : 'Chat'}`}
+                      </button>
+                      {isAnalysisLimitReached && (
+                        <p className="text-[10px] text-center text-slate-400 font-medium">
+                          Free video view uploads are only available 3x daily. Resets at midnight.
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
                 <button 
                   onClick={handleUpgrade}
                   className="w-full py-4 bg-indigo-600 text-white font-bold rounded-2xl hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 flex items-center justify-center gap-2"
