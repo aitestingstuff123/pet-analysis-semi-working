@@ -18,7 +18,8 @@ import {
   MessageSquare,
   Send,
   Trash2,
-  Settings
+  Settings,
+  ArrowLeft
 } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import { useAuth } from './lib/AuthContext';
@@ -52,6 +53,7 @@ export default function App() {
   const [uploadStatus, setUploadStatus] = useState('');
   const [userQuestion, setUserQuestion] = useState('');
   const [selectedPetId, setSelectedPetId] = useState<string>('');
+  const [selectedPetForAnalyses, setSelectedPetForAnalyses] = useState<any | null>(null);
   const [analyses, setAnalyses] = useState<any[]>([]);
   const [pets, setPets] = useState<any[]>([]);
   const [selectedAnalysis, setSelectedAnalysis] = useState<any>(null);
@@ -336,6 +338,19 @@ export default function App() {
       await deleteDoc(doc(db, 'pets', petId));
     } catch (error) {
       console.error("Failed to delete pet:", error);
+    }
+  };
+
+  const handleDeleteAnalysis = async (e: React.MouseEvent, analysisId: string) => {
+    e.stopPropagation();
+    if (!window.confirm("Are you sure you want to delete this analysis?")) return;
+    try {
+      await deleteDoc(doc(db, 'analyses', analysisId));
+      if (selectedAnalysis?.id === analysisId) {
+        setSelectedAnalysis(null);
+      }
+    } catch (error) {
+      console.error("Failed to delete analysis:", error);
     }
   };
 
@@ -682,6 +697,12 @@ export default function App() {
                         }`}>
                           {analysis.status}
                         </span>
+                        <button 
+                          onClick={(e) => handleDeleteAnalysis(e, analysis.id)}
+                          className="p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                         <ChevronRight className="w-5 h-5 text-slate-300" />
                       </div>
                     </div>
@@ -705,125 +726,210 @@ export default function App() {
               exit={{ opacity: 0, y: -10 }}
               className="space-y-6"
             >
-              <div className="flex justify-between items-center">
-                <h3 className="text-xl font-bold text-slate-900">My Pet Profiles</h3>
-                <button 
-                  onClick={() => setIsAddingPet(true)}
-                  className="bg-indigo-600 text-white px-4 py-2 rounded-xl font-medium hover:bg-indigo-700 transition-all flex items-center gap-2"
-                >
-                  <Plus className="w-4 h-4" />
-                  Add Pet
-                </button>
-              </div>
-
-              {isAddingPet && (
-                <div className="bg-white p-6 rounded-2xl border border-indigo-100 shadow-xl shadow-indigo-50 animate-in fade-in slide-in-from-top-4 duration-300">
-                  <form onSubmit={handleAddPet} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-500 uppercase">Pet Name</label>
-                      <input 
-                        required
-                        value={newPet.name}
-                        onChange={e => setNewPet({...newPet, name: e.target.value})}
-                        className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                        placeholder="e.g., Buddy"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-500 uppercase">Species</label>
-                      <select 
-                        value={newPet.species}
-                        onChange={e => setNewPet({...newPet, species: e.target.value})}
-                        className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                      >
-                        <option value="dog">Dog</option>
-                        <option value="cat">Cat</option>
-                        <option value="other">Other</option>
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-500 uppercase">Breed</label>
-                      <input 
-                        value={newPet.breed}
-                        onChange={e => setNewPet({...newPet, breed: e.target.value})}
-                        className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                        placeholder="e.g., Golden Retriever"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-500 uppercase">Age</label>
-                      <input 
-                        value={newPet.age}
-                        onChange={e => setNewPet({...newPet, age: e.target.value})}
-                        className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                        placeholder="e.g., 3 years"
-                      />
-                    </div>
-                    <div className="md:col-span-2 space-y-1">
-                      <label className="text-xs font-bold text-slate-500 uppercase">Personality / Notes</label>
-                      <textarea 
-                        value={newPet.personality}
-                        onChange={e => setNewPet({...newPet, personality: e.target.value})}
-                        className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none h-20 resize-none"
-                        placeholder="e.g., Very energetic, afraid of thunder..."
-                      />
-                    </div>
-                    <div className="md:col-span-2 flex justify-end gap-3 mt-2">
-                      <button 
-                        type="button"
-                        onClick={() => setIsAddingPet(false)}
-                        className="px-4 py-2 text-slate-500 font-medium hover:bg-slate-50 rounded-lg transition-colors"
-                      >
-                        Cancel
-                      </button>
-                      <button 
-                        type="submit"
-                        className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition-colors"
-                      >
-                        Save Pet
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {pets.map(pet => (
-                  <div key={pet.id} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow relative group">
+              {selectedPetForAnalyses ? (
+                <div className="space-y-6">
+                  <div className="flex items-center gap-4">
                     <button 
-                      onClick={() => handleDeletePet(pet.id)}
-                      className="absolute top-4 right-4 p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                      onClick={() => setSelectedPetForAnalyses(null)}
+                      className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <ArrowLeft className="w-5 h-5 text-slate-600" />
                     </button>
-                    <div className="flex items-center gap-4 mb-4">
-                      <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center">
-                        {pet.species === 'dog' ? <Dog className="w-6 h-6 text-indigo-600" /> : <Cat className="w-6 h-6 text-indigo-600" />}
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-slate-900">{pet.name}</h4>
-                        <p className="text-xs text-slate-500 capitalize">{pet.species} • {pet.breed || 'Unknown Breed'}</p>
-                      </div>
-                    </div>
-                    <div className="space-y-3">
-                      <div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Age</p>
-                        <p className="text-sm text-slate-700">{pet.age || 'Not specified'}</p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Personality</p>
-                        <p className="text-sm text-slate-700 line-clamp-2">{pet.personality || 'No notes added.'}</p>
-                      </div>
+                    <div>
+                      <h3 className="text-xl font-bold text-slate-900">{selectedPetForAnalyses.name}'s History</h3>
+                      <p className="text-sm text-slate-500">All behavioral analyses for {selectedPetForAnalyses.name}</p>
                     </div>
                   </div>
-                ))}
-                {pets.length === 0 && !isAddingPet && (
-                  <div className="md:col-span-3 py-20 text-center bg-white rounded-3xl border-2 border-dashed border-slate-100">
-                    <Dog className="w-12 h-12 text-slate-200 mx-auto mb-4" />
-                    <p className="text-slate-500">No pet profiles yet. Add your first pet to get started!</p>
+
+                  <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                    <div className="divide-y divide-slate-50">
+                      {analyses.filter(a => a.petId === selectedPetForAnalyses.id).length > 0 ? (
+                        analyses
+                          .filter(a => a.petId === selectedPetForAnalyses.id)
+                          .map((analysis) => (
+                            <div 
+                              key={analysis.id} 
+                              onClick={() => setSelectedAnalysis(analysis)}
+                              className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between cursor-pointer"
+                            >
+                              <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center">
+                                  {analysis.mediaType === 'video' ? <Play className="w-6 h-6 text-slate-400" /> : <Activity className="w-6 h-6 text-slate-400" />}
+                                </div>
+                                <div>
+                                  <p className="font-semibold text-slate-900">{analysis.result?.emotionalState || 'Analysis'}</p>
+                                  <p className="text-xs text-slate-500">
+                                    {analysis.createdAt?.seconds ? new Date(analysis.createdAt.seconds * 1000).toLocaleString() : 'Just now'}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-4">
+                                <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                                  analysis.status === 'completed' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                                }`}>
+                                  {analysis.status}
+                                </span>
+                                <button 
+                                  onClick={(e) => handleDeleteAnalysis(e, analysis.id)}
+                                  className="p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                                <ChevronRight className="w-5 h-5 text-slate-300" />
+                              </div>
+                            </div>
+                          ))
+                      ) : (
+                        <div className="p-12 text-center">
+                          <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <FileText className="w-8 h-8 text-slate-300" />
+                          </div>
+                          <p className="text-slate-500">No analyses found for {selectedPetForAnalyses.name}.</p>
+                          <button 
+                            onClick={() => setActiveTab('upload')}
+                            className="mt-4 text-indigo-600 font-medium hover:underline"
+                          >
+                            Upload a video for {selectedPetForAnalyses.name}
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                )}
-              </div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-xl font-bold text-slate-900">My Pet Profiles</h3>
+                    <button 
+                      onClick={() => setIsAddingPet(true)}
+                      className="bg-indigo-600 text-white px-4 py-2 rounded-xl font-medium hover:bg-indigo-700 transition-all flex items-center gap-2"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Add Pet
+                    </button>
+                  </div>
+
+                  {isAddingPet && (
+                    <div className="bg-white p-6 rounded-2xl border border-indigo-100 shadow-xl shadow-indigo-50 animate-in fade-in slide-in-from-top-4 duration-300">
+                      <form onSubmit={handleAddPet} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-slate-500 uppercase">Pet Name</label>
+                          <input 
+                            required
+                            value={newPet.name}
+                            onChange={e => setNewPet({...newPet, name: e.target.value})}
+                            className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                            placeholder="e.g., Buddy"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-slate-500 uppercase">Species</label>
+                          <select 
+                            value={newPet.species}
+                            onChange={e => setNewPet({...newPet, species: e.target.value})}
+                            className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                          >
+                            <option value="dog">Dog</option>
+                            <option value="cat">Cat</option>
+                            <option value="other">Other</option>
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-slate-500 uppercase">Breed</label>
+                          <input 
+                            value={newPet.breed}
+                            onChange={e => setNewPet({...newPet, breed: e.target.value})}
+                            className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                            placeholder="e.g., Golden Retriever"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-slate-500 uppercase">Age</label>
+                          <input 
+                            value={newPet.age}
+                            onChange={e => setNewPet({...newPet, age: e.target.value})}
+                            className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                            placeholder="e.g., 3 years"
+                          />
+                        </div>
+                        <div className="md:col-span-2 space-y-1">
+                          <label className="text-xs font-bold text-slate-500 uppercase">Personality / Notes</label>
+                          <textarea 
+                            value={newPet.personality}
+                            onChange={e => setNewPet({...newPet, personality: e.target.value})}
+                            className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none h-20 resize-none"
+                            placeholder="e.g., Very energetic, afraid of thunder..."
+                          />
+                        </div>
+                        <div className="md:col-span-2 flex justify-end gap-3 mt-2">
+                          <button 
+                            type="button"
+                            onClick={() => setIsAddingPet(false)}
+                            className="px-4 py-2 text-slate-500 font-medium hover:bg-slate-50 rounded-lg transition-colors"
+                          >
+                            Cancel
+                          </button>
+                          <button 
+                            type="submit"
+                            className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition-colors"
+                          >
+                            Save Pet
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {pets.map(pet => (
+                      <div 
+                        key={pet.id} 
+                        onClick={() => setSelectedPetForAnalyses(pet)}
+                        className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all relative group cursor-pointer hover:border-indigo-200"
+                      >
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeletePet(pet.id);
+                          }}
+                          className="absolute top-4 right-4 p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                        <div className="flex items-center gap-4 mb-4">
+                          <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center">
+                            {pet.species === 'dog' ? <Dog className="w-6 h-6 text-indigo-600" /> : <Cat className="w-6 h-6 text-indigo-600" />}
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-slate-900">{pet.name}</h4>
+                            <p className="text-xs text-slate-500 capitalize">{pet.species} • {pet.breed || 'Unknown Breed'}</p>
+                          </div>
+                        </div>
+                        <div className="space-y-3">
+                          <div>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Age</p>
+                            <p className="text-sm text-slate-700">{pet.age || 'Not specified'}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Personality</p>
+                            <p className="text-sm text-slate-700 line-clamp-2">{pet.personality || 'No notes added.'}</p>
+                          </div>
+                        </div>
+                        <div className="mt-4 pt-4 border-t border-slate-50 flex justify-between items-center">
+                          <span className="text-xs font-medium text-indigo-600">View History</span>
+                          <ChevronRight className="w-4 h-4 text-indigo-400" />
+                        </div>
+                      </div>
+                    ))}
+                    {pets.length === 0 && !isAddingPet && (
+                      <div className="md:col-span-3 py-20 text-center bg-white rounded-3xl border-2 border-dashed border-slate-100">
+                        <Dog className="w-12 h-12 text-slate-200 mx-auto mb-4" />
+                        <p className="text-slate-500">No pet profiles yet. Add your first pet to get started!</p>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </motion.div>
           ) : activeTab === 'history' ? (
             <motion.div
@@ -857,6 +963,12 @@ export default function App() {
                       }`}>
                         {analysis.status}
                       </span>
+                      <button 
+                        onClick={(e) => handleDeleteAnalysis(e, analysis.id)}
+                        className="p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                       <ChevronRight className="w-5 h-5 text-slate-300" />
                     </div>
                   </div>
