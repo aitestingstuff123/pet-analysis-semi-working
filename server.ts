@@ -7,8 +7,15 @@ import multer from "multer";
 import dotenv from "dotenv";
 import ffmpeg from "fluent-ffmpeg";
 import ffmpegInstaller from "ffmpeg-static";
+import { initializeApp } from 'firebase/app';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 dotenv.config();
+
+// Initialize Firebase Client SDK (Works on server and uses API Key instead of Service Account)
+const firebaseConfig = JSON.parse(fs.readFileSync("./firebase-applet-config.json", "utf-8"));
+const firebaseApp = initializeApp(firebaseConfig);
+const storage = getStorage(firebaseApp);
 
 if (ffmpegInstaller) {
   ffmpeg.setFfmpegPath(ffmpegInstaller);
@@ -76,11 +83,24 @@ async function startServer() {
 
       const mediaBuffer = fs.readFileSync(compressedPath || tempPath);
       const mimeType = compressedPath ? "video/mp4" : req.file.mimetype;
+      const userId = req.body.userId || "anonymous";
+      const fileName = `analyses/${userId}/${Date.now()}_${req.file.originalname}`;
 
-      // Return processed media to frontend for Gemini analysis
+      // 2. Upload to Firebase Storage (Server-side bypasses CORS)
+      console.log(`[Server] Uploading to storage: ${fileName}`);
+      const storageRef = ref(storage, fileName);
+      const uploadResult = await uploadBytes(storageRef, mediaBuffer, {
+        contentType: mimeType
+      });
+      
+      const mediaUrl = await getDownloadURL(uploadResult.ref);
+      console.log(`[Server] Upload successful. URL: ${mediaUrl}`);
+
+      // Return processed media and URL to frontend
       res.json({
         base64: mediaBuffer.toString("base64"),
-        mimeType: mimeType
+        mimeType: mimeType,
+        mediaUrl: mediaUrl
       });
     } catch (error: any) {
       console.error("Processing error:", error);
