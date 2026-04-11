@@ -57,6 +57,22 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["analysisId", "role", "content", "createdAt"]
+    },
+    "Reminder": {
+      "title": "Reminder",
+      "description": "Pet care reminder (vaccination, medication, etc.)",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "petId": { "type": "string" },
+        "petName": { "type": "string" },
+        "title": { "type": "string" },
+        "type": { "type": "string", "enum": ["vaccination", "medication", "food", "grooming", "other"] },
+        "dueDate": { "type": "string", "format": "date" },
+        "completed": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "petId", "title", "type", "dueDate", "completed", "createdAt"]
     }
   },
   "firestore": {
@@ -75,6 +91,10 @@
     "/analyses/{analysisId}/messages/{messageId}": {
       "schema": "ChatMessage",
       "description": "Follow-up chat messages"
+    },
+    "/reminders/{reminderId}": {
+      "schema": "Reminder",
+      "description": "Pet care reminders"
     }
   }
 }

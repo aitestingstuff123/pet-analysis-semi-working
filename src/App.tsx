@@ -1,6 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
+  LineChart, 
+  Line, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer,
+  AreaChart,
+  Area
+} from 'recharts';
+import { 
   Upload, 
   Dog, 
   Cat, 
@@ -22,10 +33,91 @@ import {
   ArrowLeft,
   Utensils,
   Syringe,
-  Pencil
+  Pencil,
+  Calendar,
+  Clock,
+  Bell
 } from 'lucide-react';
 import { GoogleGenAI, Type } from '@google/genai';
 import { useAuth } from './lib/AuthContext';
+
+const MoodTrendChart = ({ analyses }: { analyses: any[] }) => {
+  const moodMap: Record<string, number> = {
+    'Calm': 5,
+    'Happy': 5,
+    'Curious': 4,
+    'Playful': 4,
+    'Neutral': 3,
+    'Alert': 3,
+    'Anxious': 2,
+    'Stressed': 1,
+    'Fearful': 1,
+    'Aggressive': 0
+  };
+
+  const data = analyses
+    .filter(a => a.status === 'completed' && a.result?.emotionalState)
+    .sort((a, b) => a.createdAt.toMillis() - b.createdAt.toMillis())
+    .map(a => ({
+      date: new Date(a.createdAt.toMillis()).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      mood: moodMap[a.result.emotionalState] || 3,
+      label: a.result.emotionalState,
+      pet: a.petName
+    }));
+
+  if (data.length < 2) {
+    return (
+      <div className="h-48 flex items-center justify-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+        <p className="text-slate-400 text-sm">Not enough data to show trends yet.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-64 w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data}>
+          <defs>
+            <linearGradient id="colorMood" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.1}/>
+              <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+          <XAxis 
+            dataKey="date" 
+            axisLine={false} 
+            tickLine={false} 
+            tick={{ fontSize: 10, fill: '#94a3b8' }}
+            dy={10}
+          />
+          <YAxis hide domain={[0, 5]} />
+          <Tooltip 
+            content={({ active, payload }) => {
+              if (active && payload && payload.length) {
+                return (
+                  <div className="bg-white p-3 rounded-xl shadow-xl border border-slate-100">
+                    <p className="text-xs font-bold text-slate-400 uppercase mb-1">{payload[0].payload.date}</p>
+                    <p className="text-sm font-bold text-indigo-600">{payload[0].payload.pet}: {payload[0].payload.label}</p>
+                  </div>
+                );
+              }
+              return null;
+            }}
+          />
+          <Area 
+            type="monotone" 
+            dataKey="mood" 
+            stroke="#4f46e5" 
+            strokeWidth={3}
+            fillOpacity={1} 
+            fill="url(#colorMood)" 
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+};
 import { 
   signInWithGoogle, 
   logout, 
@@ -58,7 +150,7 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 export default function App() {
   const { user, loading, isAdmin } = useAuth();
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'upload' | 'history' | 'pets' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'upload' | 'history' | 'pets' | 'settings' | 'reminders'>('dashboard');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
@@ -108,6 +200,17 @@ export default function App() {
     type: 'success' | 'error';
   } | null>(null);
 
+  // Reminders state
+  const [reminders, setReminders] = useState<any[]>([]);
+  const [isAddingReminder, setIsAddingReminder] = useState(false);
+  const [newReminder, setNewReminder] = useState({
+    petId: '',
+    title: '',
+    type: 'vaccination',
+    dueDate: '',
+    completed: false
+  });
+
   // Settings state
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
   const [isSendingReset, setIsSendingReset] = useState(false);
@@ -153,9 +256,22 @@ export default function App() {
       setPets(docs);
     });
 
+    // Listen for reminders
+    const qReminders = query(
+      collection(db, 'reminders'),
+      where('userId', '==', user.uid),
+      orderBy('dueDate', 'asc')
+    );
+
+    const unsubscribeReminders = onSnapshot(qReminders, (snapshot) => {
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setReminders(docs);
+    });
+
     return () => {
       unsubscribeAnalyses();
       unsubscribePets();
+      unsubscribeReminders();
     };
   }, [user]);
 
@@ -538,6 +654,53 @@ export default function App() {
     }
   };
 
+  const handleSaveReminder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !newReminder.petId || !newReminder.title || !newReminder.dueDate) return;
+
+    const selectedPet = pets.find(p => p.id === newReminder.petId);
+
+    try {
+      await addDoc(collection(db, 'reminders'), {
+        userId: user.uid,
+        petName: selectedPet?.name || 'Pet',
+        ...newReminder,
+        createdAt: Timestamp.now()
+      });
+      setIsAddingReminder(false);
+      setNewReminder({
+        petId: '',
+        title: '',
+        type: 'vaccination',
+        dueDate: '',
+        completed: false
+      });
+      setNotification({ message: 'Reminder added successfully!', type: 'success' });
+    } catch (error) {
+      console.error("Failed to add reminder:", error);
+      setNotification({ message: 'Failed to add reminder', type: 'error' });
+    }
+  };
+
+  const handleToggleReminder = async (reminderId: string, completed: boolean) => {
+    try {
+      await updateDoc(doc(db, 'reminders', reminderId), {
+        completed: !completed
+      });
+    } catch (error) {
+      console.error("Failed to update reminder:", error);
+    }
+  };
+
+  const handleDeleteReminder = async (reminderId: string) => {
+    try {
+      await deleteDoc(doc(db, 'reminders', reminderId));
+      setNotification({ message: 'Reminder deleted', type: 'success' });
+    } catch (error) {
+      console.error("Failed to delete reminder:", error);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -713,6 +876,12 @@ export default function App() {
             label="My Pets"
           />
           <NavItem 
+            active={activeTab === 'reminders'} 
+            onClick={() => { setActiveTab('reminders'); setSelectedAnalysis(null); }}
+            icon={<Bell className="w-5 h-5" />}
+            label="Reminders"
+          />
+          <NavItem 
             active={activeTab === 'settings'} 
             onClick={() => { setActiveTab('settings'); setSelectedAnalysis(null); }}
             icon={<Settings className="w-5 h-5" />}
@@ -753,6 +922,7 @@ export default function App() {
                activeTab === 'dashboard' ? 'Dashboard' : 
                activeTab === 'upload' ? 'New Analysis' : 
                activeTab === 'settings' ? 'Settings' : 
+               activeTab === 'reminders' ? 'Reminders' :
                'Report History'}
             </h2>
             <p className="text-slate-500 mt-1">
@@ -957,66 +1127,114 @@ export default function App() {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="grid grid-cols-1 md:grid-cols-3 gap-6"
+              className="space-y-8"
             >
-              <StatCard label="Total Analyses" value={analyses.length} icon={<Activity className="text-indigo-600" />} />
-              <StatCard label="Completed" value={analyses.filter(a => a.status === 'completed').length} icon={<CheckCircle2 className="text-emerald-600" />} />
-              <StatCard label="Pending" value={analyses.filter(a => a.status === 'pending').length} icon={<Loader2 className="text-amber-600" />} />
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <StatCard label="Total Analyses" value={analyses.length} icon={<Activity className="text-indigo-600" />} />
+                <StatCard label="Completed" value={analyses.filter(a => a.status === 'completed').length} icon={<CheckCircle2 className="text-emerald-600" />} />
+                <StatCard label="Pending" value={analyses.filter(a => a.status === 'pending').length} icon={<Loader2 className="text-amber-600" />} />
+              </div>
 
-              <div className="md:col-span-3 bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-                <div className="p-6 border-b border-slate-100 flex justify-between items-center">
-                  <h3 className="font-bold text-slate-900">Recent Analyses</h3>
-                  <button onClick={() => setActiveTab('history')} className="text-indigo-600 text-sm font-medium hover:underline">View All</button>
-                </div>
-                <div className="divide-y divide-slate-50">
-                  {analyses.slice(0, 5).map((analysis) => (
-                    <div 
-                      key={analysis.id} 
-                      onClick={() => setSelectedAnalysis(analysis)}
-                      className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between cursor-pointer"
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center">
-                          {analysis.mediaType === 'video' ? <Play className="w-6 h-6 text-slate-400" /> : <Activity className="w-6 h-6 text-slate-400" />}
-                        </div>
-                        <div>
-                          <p className="font-semibold text-slate-900">{analysis.petName || 'My Pet'}</p>
-                          <p className="text-xs text-slate-500">
-                            {analysis.createdAt?.seconds ? new Date(analysis.createdAt.seconds * 1000).toLocaleDateString() : 'Just now'}
-                          </p>
-                        </div>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-2 space-y-8">
+                  <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
+                    <div className="flex justify-between items-center mb-8">
+                      <div>
+                        <h3 className="text-xl font-bold text-slate-900">Behavioral Mood Trend</h3>
+                        <p className="text-sm text-slate-500">Emotional state tracking over time</p>
                       </div>
-                      <div className="flex items-center gap-4">
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                          analysis.status === 'completed' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
-                        }`}>
-                          {analysis.status}
-                        </span>
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeleteConfirmation({ 
-                              type: 'analysis', 
-                              id: analysis.id, 
-                              name: `${analysis.petName || 'Pet'}'s analysis` 
-                            });
-                          }}
-                          className="p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                      <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-widest">
+                        <div className="w-3 h-3 rounded-full bg-indigo-600"></div>
+                        Mood Level
+                      </div>
+                    </div>
+                    <MoodTrendChart analyses={analyses} />
+                  </div>
+
+                  <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                    <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+                      <h3 className="font-bold text-slate-900">Recent Analyses</h3>
+                      <button onClick={() => setActiveTab('history')} className="text-indigo-600 text-sm font-medium hover:underline">View All</button>
+                    </div>
+                    <div className="divide-y divide-slate-50">
+                      {analyses.slice(0, 5).map((analysis) => (
+                        <div 
+                          key={analysis.id} 
+                          onClick={() => setSelectedAnalysis(analysis)}
+                          className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between cursor-pointer"
                         >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                        <ChevronRight className="w-5 h-5 text-slate-300" />
-                      </div>
+                          <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center">
+                              {analysis.mediaType === 'video' ? <Play className="w-6 h-6 text-slate-400" /> : <Activity className="w-6 h-6 text-slate-400" />}
+                            </div>
+                            <div>
+                              <p className="font-semibold text-slate-900">{analysis.petName || 'My Pet'}</p>
+                              <p className="text-xs text-slate-500">
+                                {analysis.createdAt?.seconds ? new Date(analysis.createdAt.seconds * 1000).toLocaleDateString() : 'Just now'}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                              analysis.status === 'completed' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                            }`}>
+                              {analysis.status}
+                            </span>
+                            <ChevronRight className="w-4 h-4 text-slate-300" />
+                          </div>
+                        </div>
+                      ))}
+                      {analyses.length === 0 && (
+                        <div className="p-12 text-center">
+                          <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <FileText className="w-8 h-8 text-slate-300" />
+                          </div>
+                          <p className="text-slate-500">No analyses yet. Start by uploading a video!</p>
+                        </div>
+                      )}
                     </div>
-                  ))}
-                  {analyses.length === 0 && (
-                    <div className="p-12 text-center">
-                      <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <FileText className="w-8 h-8 text-slate-300" />
-                      </div>
-                      <p className="text-slate-500">No analyses yet. Start by uploading a video!</p>
+                  </div>
+                </div>
+
+                <div className="space-y-8">
+                  <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
+                    <div className="flex justify-between items-center mb-6">
+                      <h3 className="text-lg font-bold text-slate-900">Upcoming Care</h3>
+                      <button onClick={() => setActiveTab('reminders')} className="text-indigo-600 text-xs font-bold uppercase tracking-widest hover:underline">View All</button>
                     </div>
-                  )}
+                    <div className="space-y-4">
+                      {reminders.filter(r => !r.completed).slice(0, 4).map(reminder => (
+                        <div key={reminder.id} className="flex items-start gap-4 p-4 rounded-2xl bg-slate-50 border border-slate-100">
+                          <div className={`p-2 rounded-xl ${
+                            reminder.type === 'vaccination' ? 'bg-indigo-100 text-indigo-600' :
+                            reminder.type === 'medication' ? 'bg-rose-100 text-rose-600' :
+                            'bg-amber-100 text-amber-600'
+                          }`}>
+                            {reminder.type === 'vaccination' ? <Syringe className="w-4 h-4" /> : 
+                             reminder.type === 'medication' ? <Activity className="w-4 h-4" /> : 
+                             <Bell className="w-4 h-4" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-bold text-slate-900 truncate">{reminder.title}</p>
+                            <p className="text-xs text-slate-500">{reminder.petName} • {new Date(reminder.dueDate).toLocaleDateString()}</p>
+                          </div>
+                        </div>
+                      ))}
+                      {reminders.filter(r => !r.completed).length === 0 && (
+                        <div className="py-8 text-center">
+                          <Calendar className="w-8 h-8 text-slate-200 mx-auto mb-2" />
+                          <p className="text-xs text-slate-400">No upcoming tasks.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="bg-indigo-600 p-8 rounded-3xl text-white shadow-xl shadow-indigo-100">
+                    <h3 className="text-lg font-bold mb-2">Pro Tip</h3>
+                    <p className="text-indigo-100 text-sm leading-relaxed">
+                      Regularly tracking your pet's mood helps identify early signs of health or stress issues.
+                    </p>
+                  </div>
                 </div>
               </div>
             </motion.div>
@@ -1424,6 +1642,152 @@ export default function App() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </motion.div>
+          ) : activeTab === 'reminders' ? (
+            <motion.div
+              key="reminders"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="space-y-8"
+            >
+              <div className="flex justify-between items-center">
+                <h3 className="text-xl font-bold text-slate-900">Care Reminders</h3>
+                <button 
+                  onClick={() => setIsAddingReminder(true)}
+                  className="bg-indigo-600 text-white px-4 py-2 rounded-xl font-medium hover:bg-indigo-700 transition-all flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Reminder
+                </button>
+              </div>
+
+              {isAddingReminder && (
+                <div className="bg-white p-6 rounded-2xl border border-indigo-100 shadow-xl shadow-indigo-50 animate-in fade-in slide-in-from-top-4 duration-300">
+                  <h4 className="text-lg font-bold text-slate-900 mb-4">New Reminder</h4>
+                  <form onSubmit={handleSaveReminder} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-500 uppercase">Pet</label>
+                      <select 
+                        required
+                        value={newReminder.petId}
+                        onChange={e => setNewReminder({...newReminder, petId: e.target.value})}
+                        className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                      >
+                        <option value="">Select Pet</option>
+                        {pets.map(pet => (
+                          <option key={pet.id} value={pet.id}>{pet.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-500 uppercase">Type</label>
+                      <select 
+                        value={newReminder.type}
+                        onChange={e => setNewReminder({...newReminder, type: e.target.value})}
+                        className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                      >
+                        <option value="vaccination">Vaccination</option>
+                        <option value="medication">Medication</option>
+                        <option value="food">Food</option>
+                        <option value="grooming">Grooming</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </div>
+                    <div className="md:col-span-2 space-y-1">
+                      <label className="text-xs font-bold text-slate-500 uppercase">Reminder Title</label>
+                      <input 
+                        required
+                        value={newReminder.title}
+                        onChange={e => setNewReminder({...newReminder, title: e.target.value})}
+                        className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                        placeholder="e.g., Annual Rabies Shot"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-500 uppercase">Due Date</label>
+                      <input 
+                        required
+                        type="date"
+                        value={newReminder.dueDate}
+                        onChange={e => setNewReminder({...newReminder, dueDate: e.target.value})}
+                        className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                      />
+                    </div>
+                    <div className="md:col-span-2 flex justify-end gap-3 mt-2">
+                      <button 
+                        type="button"
+                        onClick={() => setIsAddingReminder(false)}
+                        className="px-4 py-2 text-slate-500 font-medium hover:bg-slate-50 rounded-lg transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button 
+                        type="submit"
+                        className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition-colors"
+                      >
+                        Save Reminder
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {reminders.map(reminder => (
+                  <div 
+                    key={reminder.id}
+                    className={`bg-white p-6 rounded-2xl border transition-all relative group ${
+                      reminder.completed ? 'border-slate-100 opacity-60' : 'border-slate-200 shadow-sm hover:shadow-md'
+                    }`}
+                  >
+                    <button 
+                      onClick={() => handleDeleteReminder(reminder.id)}
+                      className="absolute top-4 right-4 p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
+                        reminder.completed ? 'bg-slate-100 text-slate-400' :
+                        reminder.type === 'vaccination' ? 'bg-indigo-50 text-indigo-600' :
+                        reminder.type === 'medication' ? 'bg-rose-50 text-rose-600' :
+                        'bg-amber-50 text-amber-600'
+                      }`}>
+                        {reminder.type === 'vaccination' ? <Syringe className="w-6 h-6" /> : 
+                         reminder.type === 'medication' ? <Activity className="w-6 h-6" /> : 
+                         <Bell className="w-6 h-6" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h4 className={`font-bold text-slate-900 truncate ${reminder.completed ? 'line-through' : ''}`}>{reminder.title}</h4>
+                        <p className="text-xs text-slate-500 capitalize">{reminder.petName} • {reminder.type}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between mt-6">
+                      <div className="flex items-center gap-2 text-slate-500">
+                        <Calendar className="w-4 h-4" />
+                        <span className="text-xs font-medium">{new Date(reminder.dueDate).toLocaleDateString()}</span>
+                      </div>
+                      <button 
+                        onClick={() => handleToggleReminder(reminder.id, reminder.completed)}
+                        className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                          reminder.completed 
+                            ? 'bg-slate-100 text-slate-500' 
+                            : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white'
+                        }`}
+                      >
+                        {reminder.completed ? 'Completed' : 'Mark Done'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {reminders.length === 0 && !isAddingReminder && (
+                  <div className="md:col-span-3 py-20 text-center bg-white rounded-3xl border-2 border-dashed border-slate-100">
+                    <Bell className="w-12 h-12 text-slate-200 mx-auto mb-4" />
+                    <p className="text-slate-500">No care reminders yet. Stay on top of your pet's health!</p>
+                  </div>
+                )}
               </div>
             </motion.div>
           ) : activeTab === 'settings' ? (
