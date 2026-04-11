@@ -19,7 +19,10 @@ import {
   Send,
   Trash2,
   Settings,
-  ArrowLeft
+  ArrowLeft,
+  Utensils,
+  Syringe,
+  Pencil
 } from 'lucide-react';
 import { GoogleGenAI, Type } from '@google/genai';
 import { useAuth } from './lib/AuthContext';
@@ -40,11 +43,13 @@ import {
   uploadString,
   getDownloadURL,
   addDoc,
+  updateDoc,
   deleteDoc,
   doc,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   updateProfile,
+  sendPasswordResetEmail,
   handleFirestoreError,
   OperationType
 } from './lib/firebase';
@@ -53,7 +58,7 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 export default function App() {
   const { user, loading, isAdmin } = useAuth();
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'upload' | 'history' | 'pets'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'upload' | 'history' | 'pets' | 'settings'>('dashboard');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
@@ -69,12 +74,18 @@ export default function App() {
 
   // Pet management state
   const [isAddingPet, setIsAddingPet] = useState(false);
+  const [editingPetId, setEditingPetId] = useState<string | null>(null);
+  const [petImageFile, setPetImageFile] = useState<File | null>(null);
+  const [isUploadingPetImage, setIsUploadingPetImage] = useState(false);
   const [newPet, setNewPet] = useState({
     name: '',
     species: 'dog',
     breed: '',
     age: '',
-    personality: ''
+    personality: '',
+    photoUrl: '',
+    diet: '',
+    vaccinations: ''
   });
 
   // Auth states
@@ -96,6 +107,17 @@ export default function App() {
     message: string;
     type: 'success' | 'error';
   } | null>(null);
+
+  // Settings state
+  const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
+  const [isSendingReset, setIsSendingReset] = useState(false);
+  const [settingsName, setSettingsName] = useState('');
+
+  useEffect(() => {
+    if (user) {
+      setSettingsName(user.displayName || '');
+    }
+  }, [user]);
 
   useEffect(() => {
     if (notification) {
@@ -389,26 +411,55 @@ export default function App() {
     }
   };
 
-  const handleAddPet = async (e: React.FormEvent) => {
+  const handleSavePet = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPet.name || !user) return;
 
     try {
-      await addDoc(collection(db, 'pets'), {
-        userId: user.uid,
-        ...newPet,
-        createdAt: Timestamp.now()
-      });
+      let photoUrl = newPet.photoUrl;
+      if (petImageFile) {
+        setIsUploadingPetImage(true);
+        const fileName = `pets/${user.uid}/${Date.now()}_${petImageFile.name}`;
+        const storageRef = ref(storage, fileName);
+        const uploadTask = await uploadBytesResumable(storageRef, petImageFile);
+        photoUrl = await getDownloadURL(uploadTask.ref);
+      }
+
+      if (editingPetId) {
+        await updateDoc(doc(db, 'pets', editingPetId), {
+          ...newPet,
+          photoUrl,
+          updatedAt: Timestamp.now()
+        });
+        setNotification({ message: 'Pet profile updated successfully!', type: 'success' });
+      } else {
+        await addDoc(collection(db, 'pets'), {
+          userId: user.uid,
+          ...newPet,
+          photoUrl,
+          createdAt: Timestamp.now()
+        });
+        setNotification({ message: 'Pet profile added successfully!', type: 'success' });
+      }
+
       setIsAddingPet(false);
+      setEditingPetId(null);
+      setPetImageFile(null);
       setNewPet({
         name: '',
         species: 'dog',
         breed: '',
         age: '',
-        personality: ''
+        personality: '',
+        photoUrl: '',
+        diet: '',
+        vaccinations: ''
       });
     } catch (error) {
-      console.error("Failed to add pet:", error);
+      console.error("Failed to save pet:", error);
+      setNotification({ message: `Failed to ${editingPetId ? 'update' : 'add'} pet profile`, type: 'error' });
+    } finally {
+      setIsUploadingPetImage(false);
     }
   };
 
@@ -457,6 +508,33 @@ export default function App() {
       }
     } catch (error: any) {
       setAuthError(error.message);
+    }
+  };
+
+  const handleUpdateProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !settingsName.trim()) return;
+    setIsUpdatingProfile(true);
+    try {
+      await updateProfile(user, { displayName: settingsName.trim() });
+      setNotification({ message: 'Profile updated successfully!', type: 'success' });
+    } catch (error: any) {
+      setNotification({ message: error.message || 'Failed to update profile', type: 'error' });
+    } finally {
+      setIsUpdatingProfile(false);
+    }
+  };
+
+  const handlePasswordReset = async () => {
+    if (!user?.email) return;
+    setIsSendingReset(true);
+    try {
+      await sendPasswordResetEmail(auth, user.email);
+      setNotification({ message: 'Password reset email sent!', type: 'success' });
+    } catch (error: any) {
+      setNotification({ message: error.message || 'Failed to send reset email', type: 'error' });
+    } finally {
+      setIsSendingReset(false);
     }
   };
 
@@ -634,6 +712,12 @@ export default function App() {
             icon={<Dog className="w-5 h-5" />}
             label="My Pets"
           />
+          <NavItem 
+            active={activeTab === 'settings'} 
+            onClick={() => { setActiveTab('settings'); setSelectedAnalysis(null); }}
+            icon={<Settings className="w-5 h-5" />}
+            label="Settings"
+          />
         </nav>
 
         <div className="p-4 border-t border-slate-100">
@@ -665,7 +749,11 @@ export default function App() {
         <header className="mb-8 flex justify-between items-end">
           <div>
             <h2 className="text-3xl font-bold text-slate-900">
-              {selectedAnalysis ? 'Analysis Report' : activeTab === 'dashboard' ? 'Dashboard' : activeTab === 'upload' ? 'New Analysis' : 'Report History'}
+              {selectedAnalysis ? 'Analysis Report' : 
+               activeTab === 'dashboard' ? 'Dashboard' : 
+               activeTab === 'upload' ? 'New Analysis' : 
+               activeTab === 'settings' ? 'Settings' : 
+               'Report History'}
             </h2>
             <p className="text-slate-500 mt-1">
               {selectedAnalysis ? `Report for ${selectedAnalysis.petName || 'My Pet'}` : `Welcome back, ${(user.displayName || 'User').split(' ')[0]}`}
@@ -949,9 +1037,23 @@ export default function App() {
                     >
                       <ArrowLeft className="w-5 h-5 text-slate-600" />
                     </button>
-                    <div>
-                      <h3 className="text-xl font-bold text-slate-900">{selectedPetForAnalyses.name}'s History</h3>
-                      <p className="text-sm text-slate-500">All behavioral analyses for {selectedPetForAnalyses.name}</p>
+                    <div className="flex items-center gap-4">
+                      {selectedPetForAnalyses.photoUrl ? (
+                        <img 
+                          src={selectedPetForAnalyses.photoUrl} 
+                          alt={selectedPetForAnalyses.name}
+                          className="w-12 h-12 rounded-xl object-cover border border-slate-200"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center">
+                          {selectedPetForAnalyses.species === 'dog' ? <Dog className="w-6 h-6 text-indigo-600" /> : <Cat className="w-6 h-6 text-indigo-600" />}
+                        </div>
+                      )}
+                      <div>
+                        <h3 className="text-xl font-bold text-slate-900">{selectedPetForAnalyses.name}'s History</h3>
+                        <p className="text-sm text-slate-500">All behavioral analyses for {selectedPetForAnalyses.name}</p>
+                      </div>
                     </div>
                   </div>
 
@@ -1022,7 +1124,21 @@ export default function App() {
                   <div className="flex justify-between items-center">
                     <h3 className="text-xl font-bold text-slate-900">My Pet Profiles</h3>
                     <button 
-                      onClick={() => setIsAddingPet(true)}
+                      onClick={() => {
+                        setIsAddingPet(true);
+                        setEditingPetId(null);
+                        setPetImageFile(null);
+                        setNewPet({
+                          name: '',
+                          species: 'dog',
+                          breed: '',
+                          age: '',
+                          personality: '',
+                          photoUrl: '',
+                          diet: '',
+                          vaccinations: ''
+                        });
+                      }}
                       className="bg-indigo-600 text-white px-4 py-2 rounded-xl font-medium hover:bg-indigo-700 transition-all flex items-center gap-2"
                     >
                       <Plus className="w-4 h-4" />
@@ -1032,7 +1148,8 @@ export default function App() {
 
                   {isAddingPet && (
                     <div className="bg-white p-6 rounded-2xl border border-indigo-100 shadow-xl shadow-indigo-50 animate-in fade-in slide-in-from-top-4 duration-300">
-                      <form onSubmit={handleAddPet} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <h4 className="text-lg font-bold text-slate-900 mb-4">{editingPetId ? 'Edit Pet Profile' : 'Add New Pet'}</h4>
+                      <form onSubmit={handleSavePet} className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-1">
                           <label className="text-xs font-bold text-slate-500 uppercase">Pet Name</label>
                           <input 
@@ -1074,6 +1191,51 @@ export default function App() {
                           />
                         </div>
                         <div className="md:col-span-2 space-y-1">
+                          <label className="text-xs font-bold text-slate-500 uppercase">Profile Picture</label>
+                          <div className="flex items-center gap-4">
+                            <label className="flex-1">
+                              <input 
+                                type="file" 
+                                accept="image/*" 
+                                className="hidden" 
+                                onChange={(e) => setPetImageFile(e.target.files?.[0] || null)}
+                              />
+                              <div className="w-full px-4 py-2 rounded-lg border border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50 transition-all cursor-pointer flex items-center justify-center gap-2 text-sm text-slate-600">
+                                <Upload className="w-4 h-4" />
+                                {petImageFile ? petImageFile.name : 'Choose Image'}
+                              </div>
+                            </label>
+                            {(petImageFile || newPet.photoUrl) && (
+                              <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-200">
+                                <img 
+                                  src={petImageFile ? URL.createObjectURL(petImageFile) : newPet.photoUrl} 
+                                  alt="Preview" 
+                                  className="w-full h-full object-cover" 
+                                  referrerPolicy="no-referrer"
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="md:col-span-2 space-y-1">
+                          <label className="text-xs font-bold text-slate-500 uppercase">Dietary Information</label>
+                          <textarea 
+                            value={newPet.diet}
+                            onChange={e => setNewPet({...newPet, diet: e.target.value})}
+                            className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none h-20 resize-none"
+                            placeholder="e.g., Grain-free kibble, twice a day..."
+                          />
+                        </div>
+                        <div className="md:col-span-2 space-y-1">
+                          <label className="text-xs font-bold text-slate-500 uppercase">Vaccination Records</label>
+                          <textarea 
+                            value={newPet.vaccinations}
+                            onChange={e => setNewPet({...newPet, vaccinations: e.target.value})}
+                            className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none h-20 resize-none"
+                            placeholder="e.g., Rabies (2025), DHPP (2024)..."
+                          />
+                        </div>
+                        <div className="md:col-span-2 space-y-1">
                           <label className="text-xs font-bold text-slate-500 uppercase">Personality / Notes</label>
                           <textarea 
                             value={newPet.personality}
@@ -1085,16 +1247,25 @@ export default function App() {
                         <div className="md:col-span-2 flex justify-end gap-3 mt-2">
                           <button 
                             type="button"
-                            onClick={() => setIsAddingPet(false)}
+                            onClick={() => {
+                              setIsAddingPet(false);
+                              setEditingPetId(null);
+                            }}
                             className="px-4 py-2 text-slate-500 font-medium hover:bg-slate-50 rounded-lg transition-colors"
                           >
                             Cancel
                           </button>
                           <button 
                             type="submit"
-                            className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition-colors"
+                            disabled={isUploadingPetImage}
+                            className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                           >
-                            Save Pet
+                            {isUploadingPetImage ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                Saving...
+                              </>
+                            ) : (editingPetId ? 'Update Pet' : 'Save Pet')}
                           </button>
                         </div>
                       </form>
@@ -1108,23 +1279,55 @@ export default function App() {
                         onClick={() => setSelectedPetForAnalyses(pet)}
                         className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all relative group cursor-pointer hover:border-indigo-200"
                       >
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeleteConfirmation({ 
-                              type: 'pet', 
-                              id: pet.id, 
-                              name: pet.name 
-                            });
-                          }}
-                          className="absolute top-4 right-4 p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingPetId(pet.id);
+                              setNewPet({
+                                name: pet.name,
+                                species: pet.species,
+                                breed: pet.breed || '',
+                                age: pet.age || '',
+                                personality: pet.personality || '',
+                                photoUrl: pet.photoUrl || '',
+                                diet: pet.diet || '',
+                                vaccinations: pet.vaccinations || ''
+                              });
+                              setIsAddingPet(true);
+                              setPetImageFile(null);
+                            }}
+                            className="p-2 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteConfirmation({ 
+                                type: 'pet', 
+                                id: pet.id, 
+                                name: pet.name 
+                              });
+                            }}
+                            className="p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                         <div className="flex items-center gap-4 mb-4">
-                          <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center">
-                            {pet.species === 'dog' ? <Dog className="w-6 h-6 text-indigo-600" /> : <Cat className="w-6 h-6 text-indigo-600" />}
-                          </div>
+                          {pet.photoUrl ? (
+                            <img 
+                              src={pet.photoUrl} 
+                              alt={pet.name}
+                              className="w-12 h-12 rounded-xl object-cover border border-slate-100"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center">
+                              {pet.species === 'dog' ? <Dog className="w-6 h-6 text-indigo-600" /> : <Cat className="w-6 h-6 text-indigo-600" />}
+                            </div>
+                          )}
                           <div>
                             <h4 className="font-bold text-slate-900">{pet.name}</h4>
                             <p className="text-xs text-slate-500 capitalize">{pet.species} • {pet.breed || 'Unknown Breed'}</p>
@@ -1137,8 +1340,24 @@ export default function App() {
                           </div>
                           <div>
                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Personality</p>
-                            <p className="text-sm text-slate-700 line-clamp-2">{pet.personality || 'No notes added.'}</p>
+                            <p className="text-sm text-slate-700 line-clamp-1">{pet.personality || 'No notes added.'}</p>
                           </div>
+                          {pet.diet && (
+                            <div>
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                                <Utensils className="w-2 h-2" /> Diet
+                              </p>
+                              <p className="text-sm text-slate-700 line-clamp-1">{pet.diet}</p>
+                            </div>
+                          )}
+                          {pet.vaccinations && (
+                            <div>
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                                <Syringe className="w-2 h-2" /> Vaccinations
+                              </p>
+                              <p className="text-sm text-slate-700 line-clamp-1">{pet.vaccinations}</p>
+                            </div>
+                          )}
                         </div>
                         <div className="mt-4 pt-4 border-t border-slate-50 flex justify-between items-center">
                           <span className="text-xs font-medium text-indigo-600">View History</span>
@@ -1205,6 +1424,90 @@ export default function App() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </motion.div>
+          ) : activeTab === 'settings' ? (
+            <motion.div
+              key="settings"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="max-w-2xl mx-auto space-y-8"
+            >
+              <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
+                <h3 className="text-2xl font-bold text-slate-900 mb-6">Account Settings</h3>
+                
+                <div className="space-y-8">
+                  {/* Profile Section */}
+                  <section className="space-y-4">
+                    <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Profile Information</h4>
+                    <form onSubmit={handleUpdateProfile} className="space-y-4">
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-500 uppercase">Display Name</label>
+                        <input 
+                          value={settingsName}
+                          onChange={(e) => setSettingsName(e.target.value)}
+                          className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                          placeholder="Your full name"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-500 uppercase">Email Address</label>
+                        <input 
+                          disabled
+                          value={user?.email || ''}
+                          className="w-full px-4 py-3 rounded-xl border border-slate-100 bg-slate-50 text-slate-400 outline-none cursor-not-allowed"
+                        />
+                        <p className="text-[10px] text-slate-400 italic">Email cannot be changed currently.</p>
+                      </div>
+                      <button 
+                        type="submit"
+                        disabled={isUpdatingProfile || settingsName === user?.displayName}
+                        className="px-6 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all disabled:opacity-50 flex items-center gap-2"
+                      >
+                        {isUpdatingProfile && <Loader2 className="w-4 h-4 animate-spin" />}
+                        Update Profile
+                      </button>
+                    </form>
+                  </section>
+
+                  <hr className="border-slate-100" />
+
+                  {/* Security Section */}
+                  <section className="space-y-4">
+                    <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Security</h4>
+                    <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <p className="font-bold text-slate-900">Reset Password</p>
+                          <p className="text-sm text-slate-500">We'll send a password reset link to your email address.</p>
+                        </div>
+                        <button 
+                          onClick={handlePasswordReset}
+                          disabled={isSendingReset}
+                          className="px-4 py-2 bg-white border border-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50 flex items-center gap-2"
+                        >
+                          {isSendingReset && <Loader2 className="w-4 h-4 animate-spin" />}
+                          Send Link
+                        </button>
+                      </div>
+                    </div>
+                  </section>
+
+                  <hr className="border-slate-100" />
+
+                  {/* Danger Zone */}
+                  <section className="space-y-4">
+                    <h4 className="text-sm font-bold text-red-400 uppercase tracking-wider">Danger Zone</h4>
+                    <button 
+                      onClick={logout}
+                      className="w-full px-6 py-4 bg-red-50 text-red-600 font-bold rounded-2xl hover:bg-red-100 transition-all flex items-center justify-center gap-2"
+                    >
+                      <LogOut className="w-5 h-5" />
+                      Sign Out of All Devices
+                    </button>
+                  </section>
+                </div>
               </div>
             </motion.div>
           ) : (
