@@ -1,0 +1,5 @@
+{
+  "name": "PawBehavior",
+  "description": "Professional AI behavior analysis for your beloved pets using Gemini.",
+  "requestFramePermissions": ["camera", "microphone"]
+}
