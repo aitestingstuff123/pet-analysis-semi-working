@@ -213,6 +213,7 @@ export default function App() {
   const [newMessage, setNewMessage] = useState('');
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [showLimitModal, setShowLimitModal] = useState<{ type: 'analysis' | 'chat', message: string } | null>(null);
+  const [paywallCooldown, setPaywallCooldown] = useState(false);
 
   // Pet management state
   const [isAddingPet, setIsAddingPet] = useState(false);
@@ -347,6 +348,23 @@ export default function App() {
   }, [notification]);
 
   useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (paywallCooldown && !showLimitModal) {
+      timer = setTimeout(() => {
+        const isPro = userData?.subscriptionTier === 'pro';
+        const freeLimit = 3;
+        if (!isPro && (userData?.analysesCount || 0) >= freeLimit && (userData?.bonusAnalyses || 0) <= 0) {
+          setShowLimitModal({
+            type: 'analysis',
+            message: `Ready to learn more? Upgrade to Pro or watch a quick ad to continue analyzing your pet's behavior.`
+          });
+        }
+      }, 10000); // Re-show after 10 seconds
+    }
+    return () => clearTimeout(timer);
+  }, [paywallCooldown, showLimitModal, userData]);
+
+  useEffect(() => {
     if (!user) return;
 
     // Listen for analyses
@@ -438,26 +456,29 @@ export default function App() {
     return () => unsubscribeMessages();
   }, [selectedAnalysis]);
 
+  const handleInitiateUpload = () => {
+    if (!user || !userData) return;
+    
+    const isPro = userData.subscriptionTier === 'pro';
+    const freeLimit = 3;
+    if (!isPro && userData.analysesCount >= freeLimit && (userData.bonusAnalyses || 0) <= 0) {
+      setShowLimitModal({
+        type: 'analysis',
+        message: `You've reached the free limit of ${freeLimit} analyses. Upgrade to Pro or watch an ad for +1 analysis!`
+      });
+      return;
+    }
+    
+    // Trigger file input
+    const fileInput = document.getElementById('behavior-file-input');
+    if (fileInput) {
+      (fileInput as HTMLInputElement).click();
+    }
+  };
+
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user || !userData) return;
-
-    // Check subscription limits
-    const isPro = userData.subscriptionTier === 'pro';
-    const freeLimit = 3;
-    if (!isPro && userData.analysesCount >= freeLimit) {
-      if ((userData.bonusAnalyses || 0) > 0) {
-        // Bonus available, will be consumed upon successful analysis
-        console.log("[Limits] Using bonus analysis. Remaining:", userData.bonusAnalyses - 1);
-      } else {
-        e.target.value = ''; // Clear input to allow re-selection of the same file
-        setShowLimitModal({
-          type: 'analysis',
-          message: `You've reached the free limit of ${freeLimit} analyses. Upgrade to Pro or watch an ad for +1 analysis!`
-        });
-        return;
-      }
-    }
 
     // Commercial limit: 50MB max for raw upload
     if (file.size > 50 * 1024 * 1024) {
@@ -2414,12 +2435,33 @@ export default function App() {
                         />
                       </div>
 
-                      <label className="block">
-                        <input type="file" className="hidden" accept="video/*,audio/*" onChange={handleUpload} />
-                        <span className="w-full inline-flex items-center justify-center bg-indigo-600 text-white px-8 py-4 rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 cursor-pointer active:scale-[0.98]">
-                          Analyze Behavior
-                        </span>
-                      </label>
+                      <div className="block">
+                        <input 
+                          id="behavior-file-input"
+                          type="file" 
+                          className="hidden" 
+                          accept="video/*,audio/*" 
+                          onChange={handleUpload} 
+                        />
+                        <button 
+                          onClick={handleInitiateUpload}
+                          disabled={paywallCooldown}
+                          className={`w-full inline-flex items-center justify-center px-8 py-4 rounded-xl font-bold transition-all shadow-lg cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${
+                            paywallCooldown 
+                              ? 'bg-slate-100 text-slate-400 shadow-none' 
+                              : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-100'
+                          }`}
+                        >
+                          {paywallCooldown ? (
+                            <div className="flex items-center gap-2">
+                              <Clock className="w-5 h-5" />
+                              <span>Limit Reached</span>
+                            </div>
+                          ) : (
+                            'Analyze Behavior'
+                          )}
+                        </button>
+                      </div>
                     </div>
 
                     <p className="text-xs text-slate-400">Supported formats: MP4, MOV, MP3, WAV (Max 50MB)</p>
@@ -2536,7 +2578,13 @@ export default function App() {
                   Upgrade to Pro
                 </button>
                 <button 
-                  onClick={() => setShowLimitModal(null)}
+                  onClick={() => {
+                    setShowLimitModal(null);
+                    if (showLimitModal.type === 'analysis') {
+                      setPaywallCooldown(true);
+                      setTimeout(() => setPaywallCooldown(false), 5000); // 5 second cooldown
+                    }
+                  }}
                   className="w-full py-4 text-slate-500 font-bold hover:bg-slate-50 rounded-2xl transition-all"
                 >
                   Maybe Later
