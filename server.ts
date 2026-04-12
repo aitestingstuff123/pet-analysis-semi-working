@@ -11,7 +11,6 @@ import cors from "cors";
 import { initializeApp } from 'firebase/app';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import admin from 'firebase-admin';
-import { getStorage as getStorageAdmin } from 'firebase-admin/storage';
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 
 dotenv.config();
@@ -27,49 +26,48 @@ try {
     firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
     
     if (!admin.apps.length) {
-      // Initialize with default credentials - most reliable in Cloud Run
-      admin.initializeApp();
-      console.log("[Server] Firebase Admin initialized with default credentials");
+      admin.initializeApp({
+        projectId: firebaseConfig.projectId,
+        storageBucket: firebaseConfig.storageBucket
+      });
+      console.log("[Server] Firebase Admin initialized for project:", firebaseConfig.projectId);
     }
 
-    // Initialize Firestore with the specific database ID from config
     const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
     
+    // Try the configured database first
     try {
-      dbAdmin = admin.firestore(dbId);
-      console.log(`[Server] Firestore Admin initialized with DB: ${dbId}`);
+      dbAdmin = getFirestore(dbId);
+      console.log(`[Server] Firestore Admin initialized with DB ID: ${dbId}`);
     } catch (err) {
-      console.warn(`[Server] Failed to initialize Firestore with DB: ${dbId}, falling back to (default). Error:`, err);
-      dbAdmin = admin.firestore();
+      console.warn(`[Server] Failed to initialize Firestore with DB ID: ${dbId}, falling back to default.`, err);
+      dbAdmin = getFirestore();
     }
     
     // Initialize Storage Bucket
-    const bucketName = firebaseConfig.storageBucket;
-    bucket = admin.storage().bucket(bucketName);
+    bucket = admin.storage().bucket(firebaseConfig.storageBucket);
     
-    console.log(`[Server] Storage Bucket (${bucketName}) initialized`);
+    console.log(`[Server] Storage Bucket (${firebaseConfig.storageBucket}) initialized`);
 
-    // Test Firestore Connection
+    // Test Firestore Connection immediately
     dbAdmin.collection('system').doc('healthcheck').set({
-      lastCheck: admin.firestore.FieldValue.serverTimestamp(),
+      lastCheck: FieldValue.serverTimestamp(),
       status: 'ok'
     }, { merge: true })
-    .then(() => console.log("[Server] Firestore Admin connection test successful"))
+    .then(() => console.log(`[Server] Firestore connection test successful on ${dbAdmin.databaseId || 'configured'} database`))
     .catch((err: any) => {
-      console.error("[Server] Firestore Admin connection test failed:", err.message);
+      console.error(`[Server] Firestore connection test failed on ${dbId}:`, err.message);
       if (dbId !== "(default)") {
-        console.log("[Server] Retrying connection test with (default) database...");
-        dbAdmin = admin.firestore();
+        console.log("[Server] Retrying with (default) database...");
+        dbAdmin = getFirestore();
         dbAdmin.collection('system').doc('healthcheck').set({
-          lastCheck: admin.firestore.FieldValue.serverTimestamp(),
+          lastCheck: FieldValue.serverTimestamp(),
           status: 'ok'
         }, { merge: true })
-        .then(() => console.log("[Server] Firestore Admin connection test successful with (default) database"))
-        .catch((retryErr: any) => console.error("[Server] Firestore Admin connection test failed with (default) database:", retryErr.message));
+        .then(() => console.log("[Server] Firestore connection successful on (default) fallback"))
+        .catch((retryErr: any) => console.error("[Server] Critical: Firestore connection failed on both databases:", retryErr.message));
       }
     });
-  } else {
-    console.warn("[Server] firebase-applet-config.json not found");
   }
 } catch (err) {
   console.error("[Server] Firebase Admin initialization error:", err);
@@ -197,14 +195,14 @@ async function startServer() {
 
     if (!dbAdmin) {
       console.error("[Subscription Sync] Firestore not initialized");
-      return res.status(500).json({ error: "Internal Server Error" });
+      return res.status(500).json({ error: "Firestore not initialized" });
     }
 
     try {
-      // NOTE: In production, you should verify this with RevenueCat's REST API
-      // using your Secret API Key. For the Simulated Store/Sandbox, we trust the client
-      // to provide immediate feedback, while the Webhook remains the source of truth.
       const userRef = dbAdmin.collection("users").doc(app_user_id);
+      
+      console.log(`[Subscription Sync] Attempting to upgrade user ${app_user_id} to Pro...`);
+      
       await userRef.set({
         status: "pro",
         subscriptionTier: "pro",
@@ -212,11 +210,15 @@ async function startServer() {
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
 
-      console.log(`[Subscription Sync] Manually upgraded user ${app_user_id} to Pro`);
-      res.json({ success: true });
-    } catch (error) {
-      console.error("[Subscription Sync] Error:", error);
-      res.status(500).json({ error: "Failed to sync subscription" });
+      console.log(`[Subscription Sync] Successfully upgraded user ${app_user_id} to Pro`);
+      res.json({ success: true, status: "pro" });
+    } catch (error: any) {
+      console.error("[Subscription Sync] Error upgrading user:", error.message);
+      res.status(500).json({ 
+        error: "Failed to sync subscription", 
+        details: error.message,
+        code: error.code 
+      });
     }
   });
 

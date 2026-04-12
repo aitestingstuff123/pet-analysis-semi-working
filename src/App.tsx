@@ -371,7 +371,7 @@ import {
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 export default function App() {
-  const { user, userData, loading, isAdmin } = useAuth();
+  const { user, userData, loading, isAdmin, setUserData } = useAuth();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'upload' | 'history' | 'pets' | 'settings' | 'reminders' | 'challenges'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -1136,19 +1136,31 @@ export default function App() {
           
           // Sync with backend immediately
           try {
-            await fetch('/api/sync-subscription', {
+            const response = await fetch('/api/sync-subscription', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ app_user_id: user.uid })
             });
+            const result = await response.json();
+            if (result.success) {
+              console.log("[RevenueCat] Backend sync successful:", result);
+            } else {
+              console.error("[RevenueCat] Backend sync failed:", result);
+            }
           } catch (syncErr) {
-            console.error("[RevenueCat] Sync failed:", syncErr);
+            console.error("[RevenueCat] Sync network error:", syncErr);
           }
 
           setNotification({ 
             message: `Welcome to ${entitlementName}! Your account has been upgraded.${isSandboxPurchase ? ' (Sandbox Mode)' : ''}`, 
             type: 'success' 
           });
+          
+          // Optimistic update to clear paywall immediately
+          if (userData) {
+            setUserData({ ...userData, subscriptionTier: 'pro', is_subscriber: true });
+          }
+          
           setShowLimitModal(null);
           confetti({
             particleCount: 150,
@@ -1198,16 +1210,28 @@ export default function App() {
         
         // Sync with backend immediately
         try {
-          await fetch('/api/sync-subscription', {
+          const response = await fetch('/api/sync-subscription', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ app_user_id: user.uid })
           });
+          const result = await response.json();
+          if (result.success) {
+            console.log("[RevenueCat] Restore sync successful:", result);
+          } else {
+            console.error("[RevenueCat] Restore sync failed:", result);
+          }
         } catch (syncErr) {
-          console.error("[RevenueCat] Sync failed:", syncErr);
+          console.error("[RevenueCat] Restore sync network error:", syncErr);
         }
 
         setNotification({ message: `Purchases restored! You are now ${entitlementName}.`, type: 'success' });
+        
+        // Optimistic update to clear paywall immediately
+        if (userData) {
+          setUserData({ ...userData, subscriptionTier: 'pro', is_subscriber: true });
+        }
+        
         setShowLimitModal(null);
       } else {
         setNotification({ message: 'No active subscription found to restore.', type: 'error' });

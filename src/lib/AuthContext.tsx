@@ -6,9 +6,16 @@ interface AuthContextType {
   userData: any | null;
   loading: boolean;
   isAdmin: boolean;
+  setUserData: (data: any) => void;
 }
 
-const AuthContext = createContext<AuthContextType>({ user: null, userData: null, loading: true, isAdmin: false });
+const AuthContext = createContext<AuthContextType>({ 
+  user: null, 
+  userData: null, 
+  loading: true, 
+  isAdmin: false,
+  setUserData: () => {} 
+});
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -34,6 +41,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         unsubscribeSnapshot = onSnapshot(userRef, (docSnap) => {
           if (docSnap.exists()) {
             const data = docSnap.data();
+            console.log("[AuthContext] User data updated:", {
+              uid: currentUser.uid,
+              subscriptionTier: data.subscriptionTier,
+              analysesCount: data.analysesCount
+            });
             
             // Ensure referral code exists for existing users
             if (!data.referralCode) {
@@ -83,7 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, userData, loading, isAdmin }}>
+    <AuthContext.Provider value={{ user, userData, loading, isAdmin, setUserData }}>
       {children}
     </AuthContext.Provider>
   );
