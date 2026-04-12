@@ -38,7 +38,10 @@ import {
   Clock,
   Bell,
   Flame,
-  Copy
+  Copy,
+  Share2,
+  Menu,
+  X
 } from 'lucide-react';
 import { GoogleGenAI, Type } from '@google/genai';
 import confetti from 'canvas-confetti';
@@ -52,19 +55,19 @@ const TrainingChallengeCard = ({ challenge, onCompleteDay }: { challenge: any, o
     <motion.div 
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm"
+      className="bg-white p-4 lg:p-8 rounded-3xl border border-slate-200 shadow-sm"
     >
       <div className="flex items-center gap-3 mb-6">
-        <div className="w-12 h-12 bg-amber-50 rounded-2xl flex items-center justify-center">
-          <Flame className="w-6 h-6 text-amber-600" />
+        <div className="w-10 h-10 lg:w-12 lg:h-12 bg-amber-50 rounded-2xl flex items-center justify-center">
+          <Flame className="w-5 h-5 lg:w-6 lg:h-6 text-amber-600" />
         </div>
         <div>
-          <h3 className="text-xl font-bold text-slate-900">{challenge.title}</h3>
-          <p className="text-sm text-slate-500">7-Day Training Challenge</p>
+          <h3 className="text-lg lg:text-xl font-bold text-slate-900">{challenge.title}</h3>
+          <p className="text-xs lg:text-sm text-slate-500">7-Day Training Challenge</p>
         </div>
       </div>
       
-      <p className="text-slate-600 mb-8 leading-relaxed">{challenge.description}</p>
+      <p className="text-sm lg:text-base text-slate-600 mb-8 leading-relaxed">{challenge.description}</p>
       
       <div className="space-y-4">
         {challenge.days?.map((day: any, idx: number) => {
@@ -75,14 +78,14 @@ const TrainingChallengeCard = ({ challenge, onCompleteDay }: { challenge: any, o
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: idx * 0.1 }}
-              className={`p-6 rounded-2xl border transition-all ${
+              className={`p-4 lg:p-6 rounded-2xl border transition-all ${
                 isCompleted 
                   ? 'bg-emerald-50 border-emerald-100' 
                   : 'bg-slate-50 border-slate-100 hover:border-amber-200'
               }`}
             >
               <div className="flex items-center justify-between mb-3">
-                <span className={`text-xs font-bold uppercase tracking-widest ${isCompleted ? 'text-emerald-600' : 'text-slate-400'}`}>
+                <span className={`text-[10px] lg:text-xs font-bold uppercase tracking-widest ${isCompleted ? 'text-emerald-600' : 'text-slate-400'}`}>
                   Day {day.day}
                 </span>
                 {isCompleted && (
@@ -91,14 +94,14 @@ const TrainingChallengeCard = ({ challenge, onCompleteDay }: { challenge: any, o
                     animate={{ scale: 1 }}
                     transition={{ type: "spring", stiffness: 200, damping: 10 }}
                   >
-                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                    <CheckCircle2 className="w-4 h-4 lg:w-5 lg:h-5 text-emerald-600" />
                   </motion.div>
                 )}
               </div>
-              <p className={`font-bold text-lg mb-1 ${isCompleted ? 'text-emerald-900' : 'text-slate-900'}`}>
+              <p className={`font-bold text-base lg:text-lg mb-1 ${isCompleted ? 'text-emerald-900' : 'text-slate-900'}`}>
                 {day.exercise}
               </p>
-              <p className={`text-sm ${isCompleted ? 'text-emerald-700' : 'text-slate-500'}`}>
+              <p className={`text-xs lg:text-sm ${isCompleted ? 'text-emerald-700' : 'text-slate-500'}`}>
                 <span className="font-semibold">Goal:</span> {day.goal}
               </p>
               
@@ -203,8 +206,8 @@ const StreakHeader = ({ streak, activityLog }: { streak: number, activityLog: an
   const hasUploadedToday = activityLog.some(ts => new Date(ts.toMillis()).toDateString() === today);
 
   return (
-    <div className="flex items-center gap-6 bg-white p-6 rounded-3xl border border-slate-200 shadow-sm mb-8">
-      <div className="relative w-20 h-20">
+    <div className="flex flex-col sm:flex-row items-center gap-4 lg:gap-6 bg-white p-4 lg:p-6 rounded-3xl border border-slate-200 shadow-sm mb-8">
+      <div className="relative w-16 h-16 lg:w-20 lg:h-20">
         <svg className="w-full h-full" viewBox="0 0 100 100">
           <circle className="text-slate-100 stroke-current" strokeWidth="8" cx="50" cy="50" r="40" fill="transparent" />
           <motion.circle 
@@ -226,20 +229,20 @@ const StreakHeader = ({ streak, activityLog }: { streak: number, activityLog: an
             } : {}}
             transition={{ repeat: Infinity, duration: 2 }}
           >
-            <Flame className={`w-8 h-8 ${hasUploadedToday ? 'text-amber-500' : 'text-slate-300'}`} />
+            <Flame className={`w-6 h-6 lg:w-8 lg:h-8 ${hasUploadedToday ? 'text-amber-500' : 'text-slate-300'}`} />
           </motion.div>
         </div>
       </div>
-      <div>
-        <div className="flex items-center gap-2">
-          <h2 className="text-3xl font-black text-slate-900">🔥 {streak} Day Streak</h2>
+      <div className="text-center sm:text-left">
+        <div className="flex flex-col sm:flex-row items-center gap-2">
+          <h2 className="text-2xl lg:text-3xl font-black text-slate-900">🔥 {streak} Day Streak</h2>
           {hasUploadedToday && (
             <span className="bg-amber-100 text-amber-600 text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider">
               Daily Goal Met
             </span>
           )}
         </div>
-        <p className="text-slate-500 mt-1">
+        <p className="text-sm text-slate-500 mt-1">
           {hasUploadedToday 
             ? "Great job! You've completed your training for today." 
             : "Keep the momentum going! Upload a video to maintain your streak."}
@@ -284,6 +287,7 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 export default function App() {
   const { user, userData, loading, isAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'upload' | 'history' | 'pets' | 'settings' | 'reminders' | 'challenges'>('dashboard');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
@@ -641,7 +645,7 @@ export default function App() {
       } catch (err: any) {
         if (err.message === "AUTH_PROXY_INTERCEPTED" || err.message.includes("Failed to fetch")) {
           // Fallback: Direct upload from frontend
-          setUploadStatus('Direct upload (bypassing proxy)...');
+          setUploadStatus('Direct Uploading.');
           setUploadProgress(30);
 
           // 1. Upload to Firebase Storage
@@ -1337,6 +1341,27 @@ export default function App() {
     }
   };
 
+  const handleShareAnalysis = async (analysis: any) => {
+    if (!analysis) return;
+    
+    const shareData = {
+      title: `PawBehavior Analysis: ${analysis.petName || 'My Pet'}`,
+      text: `Check out this behavioral analysis for ${analysis.petName || 'my pet'}! Emotional State: ${analysis.result?.emotionalState || 'Unknown'}.`,
+      url: window.location.href,
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+      } else {
+        await navigator.clipboard.writeText(`${shareData.text} ${shareData.url}`);
+        setNotification({ message: "Analysis summary copied to clipboard!", type: 'success' });
+      }
+    } catch (error) {
+      console.error("Error sharing:", error);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -1487,56 +1512,77 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
+    <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row">
+      {/* Mobile Header */}
+      <header className="lg:hidden bg-white border-b border-slate-200 p-4 flex items-center justify-between sticky top-0 z-50">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+            <Dog className="w-5 h-5 text-white" />
+          </div>
+          <span className="font-bold text-lg text-slate-900">PawBehavior</span>
+        </div>
+        <button 
+          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+          className="p-2 text-slate-500 hover:bg-slate-50 rounded-lg"
+        >
+          {isSidebarOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+        </button>
+      </header>
+
       {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-slate-200 flex flex-col">
-        <div className="p-6 flex items-center gap-3">
+      <aside className={`
+        fixed inset-0 z-40 lg:relative lg:z-0
+        w-full lg:w-64 bg-white border-r border-slate-200 flex flex-col
+        transition-transform duration-300 ease-in-out
+        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+      `}>
+        <div className="p-6 hidden lg:flex items-center gap-3">
           <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center">
             <Dog className="w-6 h-6 text-white" />
           </div>
           <span className="font-bold text-xl text-slate-900">PawBehavior</span>
         </div>
 
-        <nav className="flex-1 px-4 space-y-2">
+        <nav className="flex-1 px-4 py-6 lg:py-0 space-y-2 overflow-y-auto">
           <NavItem 
             active={activeTab === 'dashboard'} 
-            onClick={() => { setActiveTab('dashboard'); setSelectedAnalysis(null); }}
+            onClick={() => { setActiveTab('dashboard'); setSelectedAnalysis(null); setIsSidebarOpen(false); }}
             icon={<Activity className="w-5 h-5" />}
             label="Dashboard"
           />
           <NavItem 
             active={activeTab === 'upload'} 
-            onClick={() => { setActiveTab('upload'); setSelectedAnalysis(null); }}
+            onClick={() => { setActiveTab('upload'); setSelectedAnalysis(null); setIsSidebarOpen(false); }}
             icon={<Upload className="w-5 h-5" />}
             label="New Analysis"
           />
           <NavItem 
             active={activeTab === 'history'} 
-            onClick={() => { setActiveTab('history'); setSelectedAnalysis(null); }}
+            onClick={() => { setActiveTab('history'); setSelectedAnalysis(null); setIsSidebarOpen(false); }}
             icon={<History className="w-5 h-5" />}
             label="History"
           />
           <NavItem 
             active={activeTab === 'pets'} 
-            onClick={() => { setActiveTab('pets'); setSelectedAnalysis(null); }}
+            onClick={() => { setActiveTab('pets'); setSelectedAnalysis(null); setIsSidebarOpen(false); }}
             icon={<Dog className="w-5 h-5" />}
             label="My Pets"
           />
           <NavItem 
             active={activeTab === 'reminders'} 
-            onClick={() => { setActiveTab('reminders'); setSelectedAnalysis(null); }}
+            onClick={() => { setActiveTab('reminders'); setSelectedAnalysis(null); setIsSidebarOpen(false); }}
             icon={<Bell className="w-5 h-5" />}
             label="Reminders"
           />
           <NavItem 
             active={activeTab === 'challenges'} 
-            onClick={() => { setActiveTab('challenges'); setSelectedAnalysis(null); }}
+            onClick={() => { setActiveTab('challenges'); setSelectedAnalysis(null); setIsSidebarOpen(false); }}
             icon={<Flame className="w-5 h-5" />}
             label="Training Challenges"
           />
           <NavItem 
             active={activeTab === 'settings'} 
-            onClick={() => { setActiveTab('settings'); setSelectedAnalysis(null); }}
+            onClick={() => { setActiveTab('settings'); setSelectedAnalysis(null); setIsSidebarOpen(false); }}
             icon={<Settings className="w-5 h-5" />}
             label="Settings"
           />
@@ -1567,10 +1613,10 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto p-8">
-        <header className="mb-8 flex justify-between items-end">
+      <main className="flex-1 overflow-y-auto p-4 lg:p-8">
+        <header className="mb-8 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
           <div>
-            <h2 className="text-3xl font-bold text-slate-900">
+            <h2 className="text-2xl lg:text-3xl font-bold text-slate-900">
               {selectedAnalysis ? 'Analysis Report' : 
                activeTab === 'dashboard' ? 'Dashboard' : 
                activeTab === 'upload' ? 'New Analysis' : 
@@ -1579,27 +1625,39 @@ export default function App() {
                activeTab === 'challenges' ? 'Training Challenges' :
                'Report History'}
             </h2>
-            <p className="text-slate-500 mt-1">
+            <p className="text-slate-500 mt-1 text-sm lg:text-base">
               {selectedAnalysis ? `Report for ${selectedAnalysis.petName || 'My Pet'}` : `Welcome back, ${(user.displayName || 'User').split(' ')[0]}`}
             </p>
           </div>
-          {activeTab === 'dashboard' && !selectedAnalysis && (
-            <button 
-              onClick={() => setActiveTab('upload')}
-              className="bg-indigo-600 text-white px-5 py-2.5 rounded-xl font-medium hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center gap-2"
-            >
-              <Upload className="w-4 h-4" />
-              New Analysis
-            </button>
-          )}
-          {selectedAnalysis && (
-            <button 
-              onClick={() => setSelectedAnalysis(null)}
-              className="text-slate-500 hover:text-slate-900 font-medium flex items-center gap-2"
-            >
-              Back to {activeTab}
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            {activeTab === 'dashboard' && !selectedAnalysis && (
+              <button 
+                onClick={() => setActiveTab('upload')}
+                className="w-full sm:w-auto bg-indigo-600 text-white px-5 py-2.5 rounded-xl font-medium hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-2"
+              >
+                <Upload className="w-4 h-4" />
+                New Analysis
+              </button>
+            )}
+            {selectedAnalysis && (
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <button 
+                  onClick={() => handleShareAnalysis(selectedAnalysis)}
+                  className="flex-1 sm:flex-none bg-white text-slate-600 border border-slate-200 px-4 py-2.5 rounded-xl font-medium hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
+                >
+                  <Share2 className="w-4 h-4" />
+                  Share
+                </button>
+                <button 
+                  onClick={() => setSelectedAnalysis(null)}
+                  className="flex-1 sm:flex-none text-slate-500 hover:text-slate-900 font-medium flex items-center justify-center gap-2 px-4 py-2.5"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  Back
+                </button>
+              </div>
+            )}
+          </div>
         </header>
 
         <AnimatePresence mode="wait">
@@ -1698,19 +1756,19 @@ export default function App() {
                   </div>
 
                   {/* Follow-up Chat */}
-                  <div className="bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col h-[600px] overflow-hidden">
-                    <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex items-center gap-3">
-                      <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center">
-                        <MessageSquare className="w-5 h-5 text-white" />
+                  <div className="bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col h-[500px] lg:h-[600px] overflow-hidden">
+                    <div className="p-4 lg:p-6 border-b border-slate-100 bg-slate-50/50 flex items-center gap-3">
+                      <div className="w-8 h-8 lg:w-10 lg:h-10 bg-indigo-600 rounded-xl flex items-center justify-center">
+                        <MessageSquare className="w-4 h-4 lg:w-5 lg:h-5 text-white" />
                       </div>
                       <div>
-                        <h3 className="font-bold text-slate-900">Follow-up Chat</h3>
-                        <p className="text-xs text-slate-500">Ask more about this behavior</p>
+                        <h3 className="font-bold text-slate-900 text-sm lg:text-base">Follow-up Chat</h3>
+                        <p className="text-[10px] lg:text-xs text-slate-500">Ask more about this behavior</p>
                       </div>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-50/30">
-                      <div className="bg-indigo-50 p-4 rounded-2xl rounded-tl-none text-sm text-indigo-900 border border-indigo-100">
+                    <div className="flex-1 overflow-y-auto p-4 lg:p-6 space-y-4 bg-slate-50/30">
+                      <div className="bg-indigo-50 p-3 lg:p-4 rounded-2xl rounded-tl-none text-xs lg:text-sm text-indigo-900 border border-indigo-100">
                         Hello! I'm your AI Behaviorist. Based on the analysis above, do you have any specific questions about your pet's behavior?
                       </div>
                       {chatMessages.map((msg) => (
@@ -1718,7 +1776,7 @@ export default function App() {
                           key={msg.id}
                           className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                         >
-                          <div className={`max-w-[85%] p-4 rounded-2xl text-sm ${
+                          <div className={`max-w-[85%] p-3 lg:p-4 rounded-2xl text-xs lg:text-sm ${
                             msg.role === 'user' 
                               ? 'bg-indigo-600 text-white rounded-tr-none' 
                               : 'bg-white text-slate-700 border border-slate-200 rounded-tl-none shadow-sm'
@@ -1729,51 +1787,51 @@ export default function App() {
                       ))}
                       {isSendingMessage && (
                         <div className="flex justify-start">
-                          <div className="bg-white p-4 rounded-2xl rounded-tl-none border border-slate-200 shadow-sm">
+                          <div className="bg-white p-3 lg:p-4 rounded-2xl rounded-tl-none border border-slate-200 shadow-sm">
                             <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
                           </div>
                         </div>
                       )}
                     </div>
 
-                    <form onSubmit={handleSendMessage} className="p-4 bg-white border-t border-slate-100 flex gap-2">
+                    <form onSubmit={handleSendMessage} className="p-3 lg:p-4 bg-white border-t border-slate-100 flex gap-2">
                       <input 
                         value={newMessage}
                         onChange={(e) => setNewMessage(e.target.value)}
                         placeholder="Type a follow-up question..."
-                        className="flex-1 px-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
+                        className="flex-1 px-3 lg:px-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none text-xs lg:text-sm"
                       />
                       <button 
                         type="submit"
                         disabled={!newMessage.trim() || isSendingMessage}
                         className="p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all disabled:opacity-50"
                       >
-                        <Send className="w-5 h-5" />
+                        <Send className="w-4 h-4 lg:w-5 lg:h-5" />
                       </button>
                     </form>
                   </div>
 
                   {/* Metadata */}
-                  <div className="bg-slate-900 p-8 rounded-3xl text-white space-y-6">
+                  <div className="bg-slate-900 p-6 lg:p-8 rounded-3xl text-white space-y-6">
                     <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center">
-                        <FileText className="w-6 h-6 text-indigo-400" />
+                      <div className="w-10 h-10 lg:w-12 lg:h-12 bg-white/10 rounded-2xl flex items-center justify-center">
+                        <FileText className="w-5 h-5 lg:w-6 lg:h-6 text-indigo-400" />
                       </div>
                       <div>
-                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Report ID</h4>
-                        <p className="text-slate-200 font-mono text-xs">{selectedAnalysis.id}</p>
+                        <h4 className="text-[10px] lg:text-xs font-bold text-slate-400 uppercase tracking-widest">Report ID</h4>
+                        <p className="text-slate-200 font-mono text-[10px] lg:text-xs">{selectedAnalysis.id}</p>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-6">
+                    <div className="grid grid-cols-2 gap-4 lg:gap-6">
                       <div>
-                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Date</h4>
-                        <p className="text-slate-200 font-medium">
+                        <h4 className="text-[10px] lg:text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Date</h4>
+                        <p className="text-slate-200 font-medium text-sm lg:text-base">
                           {new Date(selectedAnalysis.createdAt?.seconds * 1000).toLocaleDateString()}
                         </p>
                       </div>
                       <div>
-                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Media</h4>
-                        <p className="text-slate-200 font-medium capitalize">{selectedAnalysis.mediaType}</p>
+                        <h4 className="text-[10px] lg:text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Media</h4>
+                        <p className="text-slate-200 font-medium capitalize text-sm lg:text-base">{selectedAnalysis.mediaType}</p>
                       </div>
                     </div>
                   </div>
@@ -1891,14 +1949,14 @@ export default function App() {
                 </div>
               ) : (
                 <div className="space-y-8">
-                  <div className="bg-indigo-600 p-8 rounded-[32px] text-white relative overflow-hidden shadow-xl shadow-indigo-100">
+                  <div className="bg-indigo-600 p-6 lg:p-8 rounded-[32px] text-white relative overflow-hidden shadow-xl shadow-indigo-100">
                     <div className="relative z-10">
-                      <h3 className="text-3xl font-black mb-2">Training Challenges</h3>
-                      <p className="text-indigo-100 max-w-md">
+                      <h3 className="text-2xl lg:text-3xl font-black mb-2">Training Challenges</h3>
+                      <p className="text-indigo-100 max-w-md text-sm lg:text-base">
                         Custom 7-day plans generated from your behavioral analyses to help you and your pet reach your goals.
                       </p>
                     </div>
-                    <Flame className="absolute -right-8 -bottom-8 w-64 h-64 text-white/10 rotate-12" />
+                    <Flame className="absolute -right-8 -bottom-8 w-48 lg:w-64 h-48 lg:h-64 text-white/10 rotate-12" />
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -2105,7 +2163,7 @@ export default function App() {
                   <div className="bg-amber-600 p-8 rounded-3xl text-white shadow-xl shadow-amber-100">
                     <h3 className="text-lg font-bold mb-2">Trainer Status</h3>
                     <p className="text-amber-100 text-sm leading-relaxed">
-                      Complete 30 sessions to become a "Certified Trainer" and unlock exclusive pet care insights!
+                      Complete 30 sessions and unlock your pet's potential!
                     </p>
                   </div>
                 </div>
@@ -3140,8 +3198,10 @@ function NavItem({ active, onClick, icon, label }: { active: boolean, onClick: (
       whileHover={{ x: 4 }}
       whileTap={{ scale: 0.98 }}
       onClick={onClick}
-      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium ${
-        active ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-bold text-sm ${
+        active 
+          ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' 
+          : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
       }`}
     >
       {icon}
@@ -3154,13 +3214,13 @@ function StatCard({ label, value, icon }: { label: string, value: number | strin
   return (
     <motion.div 
       whileHover={{ y: -5 }}
-      className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm"
+      className="bg-white p-4 lg:p-6 rounded-2xl border border-slate-200 shadow-sm"
     >
       <div className="flex justify-between items-start mb-4">
         <div className="p-2 bg-slate-50 rounded-lg">{icon}</div>
       </div>
-      <p className="text-slate-500 text-sm font-medium">{label}</p>
-      <p className="text-2xl font-bold text-slate-900 mt-1">{value}</p>
+      <p className="text-slate-500 text-xs lg:text-sm font-medium">{label}</p>
+      <p className="text-xl lg:text-2xl font-bold text-slate-900 mt-1">{value}</p>
     </motion.div>
   );
 }
