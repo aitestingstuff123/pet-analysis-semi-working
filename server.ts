@@ -10,7 +10,6 @@ import ffmpegPath from "ffmpeg-static";
 import cors from "cors";
 import { initializeApp } from 'firebase/app';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import Stripe from 'stripe';
 import admin from 'firebase-admin';
 import { getStorage as getStorageAdmin } from 'firebase-admin/storage';
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
@@ -28,23 +27,47 @@ try {
     firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
     
     if (!admin.apps.length) {
-      admin.initializeApp({
-        credential: admin.credential.applicationDefault(),
-        projectId: firebaseConfig.projectId,
-        storageBucket: firebaseConfig.storageBucket
-      });
-      console.log("[Server] Firebase Admin initialized with Project ID:", firebaseConfig.projectId);
+      // Initialize with default credentials - most reliable in Cloud Run
+      admin.initializeApp();
+      console.log("[Server] Firebase Admin initialized with default credentials");
     }
 
     // Initialize Firestore with the specific database ID from config
     const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
-    dbAdmin = getFirestore(dbId);
+    
+    try {
+      dbAdmin = admin.firestore(dbId);
+      console.log(`[Server] Firestore Admin initialized with DB: ${dbId}`);
+    } catch (err) {
+      console.warn(`[Server] Failed to initialize Firestore with DB: ${dbId}, falling back to (default). Error:`, err);
+      dbAdmin = admin.firestore();
+    }
     
     // Initialize Storage Bucket
     const bucketName = firebaseConfig.storageBucket;
-    bucket = getStorageAdmin().bucket(bucketName);
+    bucket = admin.storage().bucket(bucketName);
     
-    console.log(`[Server] Firestore Admin (DB: ${dbId}) and Storage Bucket (${bucketName}) initialized`);
+    console.log(`[Server] Storage Bucket (${bucketName}) initialized`);
+
+    // Test Firestore Connection
+    dbAdmin.collection('system').doc('healthcheck').set({
+      lastCheck: admin.firestore.FieldValue.serverTimestamp(),
+      status: 'ok'
+    }, { merge: true })
+    .then(() => console.log("[Server] Firestore Admin connection test successful"))
+    .catch((err: any) => {
+      console.error("[Server] Firestore Admin connection test failed:", err.message);
+      if (dbId !== "(default)") {
+        console.log("[Server] Retrying connection test with (default) database...");
+        dbAdmin = admin.firestore();
+        dbAdmin.collection('system').doc('healthcheck').set({
+          lastCheck: admin.firestore.FieldValue.serverTimestamp(),
+          status: 'ok'
+        }, { merge: true })
+        .then(() => console.log("[Server] Firestore Admin connection test successful with (default) database"))
+        .catch((retryErr: any) => console.error("[Server] Firestore Admin connection test failed with (default) database:", retryErr.message));
+      }
+    });
   } else {
     console.warn("[Server] firebase-applet-config.json not found");
   }
@@ -63,9 +86,6 @@ try {
 } catch (err) {
   console.error("[Server] Firebase Client initialization error:", err);
 }
-
-// Stripe initialization
-const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 
 if (ffmpegPath) {
   console.log("[Server] Setting FFmpeg path to:", ffmpegPath);
@@ -107,149 +127,97 @@ async function startServer() {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
 
-  // Stripe Checkout Session
-  app.post("/api/create-checkout-session", async (req, res) => {
-    if (!stripe) {
-      return res.status(500).json({ 
-        error: "Stripe is not configured on the server.",
-        details: "Please add STRIPE_SECRET_KEY and STRIPE_PRO_PRICE_ID to the Secrets panel in AI Studio Settings."
-      });
+  // RevenueCat Webhook
+  app.post("/api/revenuecat-webhook", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    const webhookSecret = process.env.REVENUECAT_WEBHOOK_AUTH_HEADER;
+
+    // Optional: Verify RevenueCat Authorization header if configured
+    if (webhookSecret && authHeader !== webhookSecret) {
+      console.warn("[RevenueCat Webhook] Unauthorized request");
+      return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const { userId, email, stripeCustomerId } = req.body;
-    if (!userId) {
-      return res.status(400).json({ error: "User ID is required" });
+    const { event } = req.body;
+    if (!event) {
+      return res.status(400).json({ error: "Missing event data" });
     }
 
-    try {
-      const session = await stripe.checkout.sessions.create({
-        customer: stripeCustomerId || undefined,
-        customer_creation: stripeCustomerId ? undefined : 'always',
-        payment_method_types: ["card"],
-        line_items: [
-          {
-            price: process.env.STRIPE_PRO_PRICE_ID,
-            quantity: 1,
-          },
-        ],
-        mode: "subscription",
-        success_url: `${process.env.APP_URL || 'http://localhost:3000'}/?session_id={CHECKOUT_SESSION_ID}&upgrade=success`,
-        cancel_url: `${process.env.APP_URL || 'http://localhost:3000'}/?upgrade=cancel`,
-        customer_email: stripeCustomerId ? undefined : email,
-        client_reference_id: userId,
-        metadata: {
-          userId: userId,
-        },
-      });
+    const { type, app_user_id, entitlement_ids, expiration_at_ms } = event;
+    console.log(`[RevenueCat Webhook] Received ${type} for user: ${app_user_id}`);
 
-      res.json({ id: session.id, url: session.url });
-    } catch (error: any) {
-      console.error("[Stripe] Checkout error:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Stripe Customer Sync
-  app.post("/api/sync-customer", async (req, res) => {
-    if (!stripe) {
-      return res.status(500).json({ error: "Stripe is not configured." });
-    }
-
-    const { userId, email, name } = req.body;
-    if (!userId || !email) {
-      return res.status(400).json({ error: "User ID and Email are required" });
+    if (!dbAdmin) {
+      console.error("[RevenueCat Webhook] Firestore not initialized");
+      return res.status(500).json({ error: "Internal Server Error" });
     }
 
     try {
-      // Check if customer already exists in Stripe by email
-      const customers = await stripe.customers.list({ email, limit: 1 });
-      let customer;
-
-      if (customers.data.length > 0) {
-        customer = customers.data[0];
-      } else {
-        // Create new customer
-        customer = await stripe.customers.create({
-          email,
-          name,
-          metadata: { userId },
-        });
-      }
-
-      // Update Firestore with Stripe Customer ID
-      if (dbAdmin) {
-        await dbAdmin.collection("users").doc(userId).set({
-          stripeCustomerId: customer.id,
-          updatedAt: FieldValue.serverTimestamp(),
+      const userRef = dbAdmin.collection("users").doc(app_user_id);
+      
+      // Handle different event types
+      // INITIAL_PURCHASE, RENEWAL, CANCELLATION, etc.
+      // We primarily care if they have the 'pro' entitlement
+      const hasProEntitlement = entitlement_ids && entitlement_ids.includes("pro");
+      
+      if (type === "INITIAL_PURCHASE" || type === "RENEWAL" || type === "RESTORE") {
+        await userRef.set({
+          status: "pro",
+          subscriptionTier: "pro",
+          is_subscriber: true,
+          premiumUntil: expiration_at_ms ? admin.firestore.Timestamp.fromMillis(expiration_at_ms) : null,
+          lastBillingEvent: type,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         }, { merge: true });
-      }
-
-      res.json({ stripeCustomerId: customer.id });
-    } catch (error: any) {
-      console.error("[Stripe Sync] Error:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Stripe Webhook
-  app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async (req, res) => {
-    if (!stripe || !process.env.STRIPE_WEBHOOK_SECRET) {
-      return res.status(500).json({ error: "Stripe Webhook is not configured." });
-    }
-
-    const sig = req.headers["stripe-signature"] as string;
-    let event;
-
-    try {
-      event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
-    } catch (err: any) {
-      console.error(`[Stripe Webhook] Error: ${err.message}`);
-      return res.status(400).send(`Webhook Error: ${err.message}`);
-    }
-
-    // Idempotency check
-    if (dbAdmin) {
-      const eventRef = dbAdmin.collection("processed_events").doc(event.id);
-      const eventDoc = await eventRef.get();
-      if (eventDoc.exists) {
-        console.log(`[Stripe Webhook] Event ${event.id} already processed.`);
-        return res.json({ received: true, alreadyProcessed: true });
-      }
-      await eventRef.set({
-        type: event.type,
-        processedAt: FieldValue.serverTimestamp(),
-      });
-    }
-
-    // Handle the event
-    if (event.type === "checkout.session.completed") {
-      const session = event.data.object as Stripe.Checkout.Session;
-      const userId = session.client_reference_id || session.metadata?.userId;
-      const customerId = session.customer as string;
-      const subscriptionId = session.subscription as string;
-
-      if (userId && dbAdmin) {
-        console.log(`[Stripe Webhook] Upgrading user ${userId} to Pro`);
-        try {
-          // Get subscription details to find period end
-          const subscription = await stripe.subscriptions.retrieve(subscriptionId) as any;
-          const premiumUntil = Timestamp.fromMillis(subscription.current_period_end * 1000);
-
-          await dbAdmin.collection("users").doc(userId).set({
-            stripeId: customerId,
-            subscriptionId: subscriptionId,
-            status: "pro",
-            subscriptionTier: "pro", // Keep legacy field if needed
-            premiumUntil: premiumUntil,
-            upgradedAt: FieldValue.serverTimestamp(),
+        console.log(`[RevenueCat Webhook] Upgraded user ${app_user_id} to Pro`);
+      } else if (type === "EXPIRATION" || type === "CANCELLATION") {
+        // Only downgrade if they don't have other active entitlements (simplified here)
+        if (!hasProEntitlement) {
+          await userRef.set({
+            status: "free",
+            subscriptionTier: "free",
+            is_subscriber: false,
+            lastBillingEvent: type,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           }, { merge: true });
-        } catch (dbErr) {
-          console.error("[Stripe Webhook] Database update error:", dbErr);
+          console.log(`[RevenueCat Webhook] Downgraded user ${app_user_id} to Free`);
         }
       }
+
+      res.json({ received: true });
+    } catch (error) {
+      console.error("[RevenueCat Webhook] Error processing event:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
+  // Subscription Sync (Immediate update after purchase)
+  app.post("/api/sync-subscription", async (req, res) => {
+    const { app_user_id } = req.body;
+    if (!app_user_id) return res.status(400).json({ error: "Missing app_user_id" });
+
+    if (!dbAdmin) {
+      console.error("[Subscription Sync] Firestore not initialized");
+      return res.status(500).json({ error: "Internal Server Error" });
     }
 
-    res.json({ received: true });
+    try {
+      // NOTE: In production, you should verify this with RevenueCat's REST API
+      // using your Secret API Key. For the Simulated Store/Sandbox, we trust the client
+      // to provide immediate feedback, while the Webhook remains the source of truth.
+      const userRef = dbAdmin.collection("users").doc(app_user_id);
+      await userRef.set({
+        status: "pro",
+        subscriptionTier: "pro",
+        is_subscriber: true,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+
+      console.log(`[Subscription Sync] Manually upgraded user ${app_user_id} to Pro`);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[Subscription Sync] Error:", error);
+      res.status(500).json({ error: "Failed to sync subscription" });
+    }
   });
 
   // Ensure uploads directory exists

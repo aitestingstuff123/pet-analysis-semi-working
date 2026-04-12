@@ -47,6 +47,7 @@ import {
 } from 'lucide-react';
 import { GoogleGenAI, Type } from '@google/genai';
 import confetti from 'canvas-confetti';
+import { Purchases, LogLevel } from "@revenuecat/purchases-js";
 import { useAuth } from './lib/AuthContext';
 import { rewardedAdService } from './lib/RewardedAdService';
 
@@ -120,6 +121,89 @@ const TrainingChallengeCard = ({ challenge, onCompleteDay }: { challenge: any, o
         })}
       </div>
     </motion.div>
+  );
+};
+
+const SubscriptionPage = ({ message, onUpgrade, onRestore, onClose, isSandbox }: { message: string, onUpgrade: () => void, onRestore: () => void, onClose: () => void, isSandbox?: boolean }) => {
+  return (
+    <div className="fixed inset-0 z-[100] flex items-end lg:items-center justify-center p-0 lg:p-4 bg-slate-900/60 backdrop-blur-sm">
+      <motion.div 
+        initial={{ opacity: 0, y: "100%" }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: "100%" }}
+        transition={{ type: "spring", damping: 25, stiffness: 200 }}
+        className="bg-white rounded-t-[32px] lg:rounded-[32px] p-8 max-w-md w-full shadow-2xl border border-slate-100 overflow-hidden"
+      >
+        <div className="flex justify-center mb-4 lg:hidden">
+          <div className="w-12 h-1.5 bg-slate-200 rounded-full" />
+        </div>
+
+        <div className="flex justify-between items-start mb-6">
+          <div className="flex items-center gap-3">
+            <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center">
+              <Zap className="w-8 h-8 text-indigo-600" />
+            </div>
+            {isSandbox && (
+              <span className="bg-amber-100 text-amber-600 text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider">
+                Sandbox Mode
+              </span>
+            )}
+          </div>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:bg-slate-50 rounded-full transition-all">
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+
+        <h3 className="text-2xl font-black text-slate-900 mb-3">
+          Unlock PawBehavior Pro
+        </h3>
+        <p className="text-slate-500 mb-8 leading-relaxed">
+          {message || "Get unlimited access to behavioral analyses, expert chats, and advanced training tools."}
+        </p>
+
+        <div className="space-y-4 mb-8">
+          <div className="flex items-center gap-3 text-sm text-slate-600">
+            <div className="w-5 h-5 bg-emerald-100 rounded-full flex items-center justify-center shrink-0">
+              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+            </div>
+            Unlimited Video Analyses
+          </div>
+          <div className="flex items-center gap-3 text-sm text-slate-600">
+            <div className="w-5 h-5 bg-emerald-100 rounded-full flex items-center justify-center shrink-0">
+              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+            </div>
+            Unlimited Expert Chat Follow-ups
+          </div>
+          <div className="flex items-center gap-3 text-sm text-slate-600">
+            <div className="w-5 h-5 bg-emerald-100 rounded-full flex items-center justify-center shrink-0">
+              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+            </div>
+            Priority AI Processing
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <button 
+            onClick={onUpgrade}
+            className="w-full py-4 bg-indigo-600 text-white font-bold rounded-2xl hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 flex items-center justify-center gap-2"
+          >
+            Subscribe for $9.99/mo
+          </button>
+          
+          <button 
+            onClick={onRestore}
+            className="w-full py-3 text-slate-500 font-bold hover:bg-slate-50 rounded-2xl transition-all text-sm"
+          >
+            Restore Purchases
+          </button>
+        </div>
+
+        <div className="mt-8 pt-6 border-t border-slate-100 flex flex-wrap justify-center gap-x-6 gap-y-2 text-[10px] text-slate-400 font-medium">
+          <a href="https://pawbehavior.app/terms" target="_blank" rel="noopener noreferrer" className="hover:text-indigo-600 underline">Terms of Use (EULA)</a>
+          <a href="https://pawbehavior.app/privacy" target="_blank" rel="noopener noreferrer" className="hover:text-indigo-600 underline">Privacy Policy</a>
+        </div>
+      </motion.div>
+    </div>
   );
 };
 
@@ -345,26 +429,51 @@ export default function App() {
     name: string;
   } | null>(null);
 
-  // Notification state
   const [notification, setNotification] = useState<{
     message: string;
     type: 'success' | 'error';
   } | null>(null);
+  const [isRestoring, setIsRestoring] = useState(false);
 
-  // Handle Stripe upgrade status from URL
+  const [isSandbox, setIsSandbox] = useState(false);
+
+  // Initialize RevenueCat
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const upgradeStatus = params.get('upgrade');
-    
-    if (upgradeStatus === 'success') {
-      setNotification({ message: 'Welcome to Pro! Your upgrade was successful.', type: 'success' });
-      // Clean up URL
-      window.history.replaceState({}, document.title, window.location.pathname);
-    } else if (upgradeStatus === 'cancel') {
-      setNotification({ message: 'Upgrade cancelled. No charges were made.', type: 'error' });
-      window.history.replaceState({}, document.title, window.location.pathname);
+    if (user) {
+      const initPurchases = async () => {
+        try {
+          // In a real app, use different keys for iOS/Android/Web
+          // For this web preview, we use the Public Web SDK Key
+          const RC_PUBLIC_KEY = import.meta.env.VITE_REVENUECAT_PUBLIC_KEY;
+          
+          if (!RC_PUBLIC_KEY || RC_PUBLIC_KEY === "goog_placeholder_key") {
+            console.warn("[RevenueCat] No valid API key found. Please set VITE_REVENUECAT_PUBLIC_KEY in your environment variables using a 'Web Billing' key from the RevenueCat dashboard.");
+            return;
+          }
+          
+          Purchases.configure(RC_PUBLIC_KEY, user.uid);
+          Purchases.setLogLevel(LogLevel.Debug);
+          
+          const purchases = Purchases.getSharedInstance();
+          const customerInfo = await purchases.getCustomerInfo();
+          setIsSandbox(purchases.isSandbox());
+          
+          console.log("[RevenueCat] Initialized for user:", user.uid, "Sandbox:", purchases.isSandbox());
+        } catch (e) {
+          console.error("[RevenueCat] Initialization failed:", e);
+        }
+      };
+      initPurchases();
     }
-  }, []);
+  }, [user]);
+
+  // Handle Notifications cleanup
+  useEffect(() => {
+    if (notification) {
+      const timer = setTimeout(() => setNotification(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [notification]);
 
   // Reminders state
   const [reminders, setReminders] = useState<any[]>([]);
@@ -1006,28 +1115,108 @@ export default function App() {
   const handleUpgrade = async () => {
     if (!user) return;
     try {
-      // Call backend to create Stripe Checkout session
-      const response = await fetch('/api/create-checkout-session', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          userId: user.uid,
-          email: user.email,
-          stripeCustomerId: userData?.stripeId || userData?.stripeCustomerId
-        }),
-      });
+      setUploadStatus('Opening secure checkout...');
+      
+      const purchases = Purchases.getSharedInstance();
+      // Get offerings from RevenueCat
+      const offerings = await purchases.getOfferings();
+      if (offerings.current && offerings.current.monthly) {
+        // Purchase the monthly package
+        const { customerInfo } = await purchases.purchasePackage(offerings.current.monthly);
+        
+        console.log("[RevenueCat] Purchase completed. CustomerInfo:", customerInfo);
+        
+        // Check for 'pro' entitlement
+        const isPro = !!customerInfo.entitlements.active.pro;
+        const hasAnyEntitlement = Object.keys(customerInfo.entitlements.active).length > 0;
+        
+        if (isPro || hasAnyEntitlement) {
+          const isSandboxPurchase = purchases.isSandbox();
+          const entitlementName = isPro ? 'Pro' : Object.keys(customerInfo.entitlements.active)[0];
+          
+          // Sync with backend immediately
+          try {
+            await fetch('/api/sync-subscription', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ app_user_id: user.uid })
+            });
+          } catch (syncErr) {
+            console.error("[RevenueCat] Sync failed:", syncErr);
+          }
 
-      const data = await response.json();
-      if (data.url) {
-        window.location.href = data.url; // Redirect to Stripe
+          setNotification({ 
+            message: `Welcome to ${entitlementName}! Your account has been upgraded.${isSandboxPurchase ? ' (Sandbox Mode)' : ''}`, 
+            type: 'success' 
+          });
+          setShowLimitModal(null);
+          confetti({
+            particleCount: 150,
+            spread: 70,
+            origin: { y: 0.6 },
+            colors: ['#4f46e5', '#818cf8', '#c7d2fe']
+          });
+        } else {
+          console.warn("[RevenueCat] Purchase successful but no active entitlement found in customerInfo.");
+          setNotification({
+            message: "Purchase successful! Your account will be updated shortly.",
+            type: "success"
+          });
+          // We still close the modal because the purchase was technically successful
+          setShowLimitModal(null);
+        }
       } else {
-        throw new Error(data.error || 'Failed to create checkout session');
+        throw new Error("No active subscription offerings found.");
       }
     } catch (error: any) {
-      console.error("Upgrade failed:", error);
-      setNotification({ message: `Upgrade failed: ${error.message}`, type: 'error' });
+      if (!error.userCancelled) {
+        console.error("[RevenueCat] Purchase error:", error);
+        setNotification({ 
+          message: error.message || 'Failed to initiate purchase. Please try again.', 
+          type: 'error' 
+        });
+      }
+    } finally {
+      setUploadStatus('');
+    }
+  };
+
+  const handleRestorePurchases = async () => {
+    if (!user) return;
+    setIsRestoring(true);
+    try {
+      const purchases = Purchases.getSharedInstance();
+      // Note: purchases-js doesn't have restorePurchases, it uses syncPurchases or getCustomerInfo
+      // Actually, looking at the types, it seems it might not have restorePurchases in the Web SDK
+      // Let's check the types again for sync or restore.
+      const customerInfo = await purchases.getCustomerInfo();
+      const isPro = !!customerInfo.entitlements.active.pro;
+      const hasAnyEntitlement = Object.keys(customerInfo.entitlements.active).length > 0;
+      
+      if (isPro || hasAnyEntitlement) {
+        const entitlementName = isPro ? 'Pro' : Object.keys(customerInfo.entitlements.active)[0];
+        
+        // Sync with backend immediately
+        try {
+          await fetch('/api/sync-subscription', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ app_user_id: user.uid })
+          });
+        } catch (syncErr) {
+          console.error("[RevenueCat] Sync failed:", syncErr);
+        }
+
+        setNotification({ message: `Purchases restored! You are now ${entitlementName}.`, type: 'success' });
+        setShowLimitModal(null);
+      } else {
+        setNotification({ message: 'No active subscription found to restore.', type: 'error' });
+      }
+    } catch (error: any) {
+      console.error("[RevenueCat] Restore error:", error);
+      setNotification({ message: 'Failed to restore purchases.', type: 'error' });
+    } finally {
+      setIsRestoring(false);
     }
   };
 
@@ -2118,7 +2307,7 @@ export default function App() {
             </motion.div>
           ) : activeTab === 'dashboard' ? (
             <motion.div 
-              key="dashboard"
+              key="dashboard-tab"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
@@ -2910,11 +3099,18 @@ export default function App() {
                   <section className="space-y-4">
                     <div className="flex justify-between items-center">
                       <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Subscription Plan</h4>
-                      <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                        userData?.subscriptionTier === 'pro' ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-600'
-                      }`}>
-                        {userData?.subscriptionTier === 'pro' ? 'Pro' : 'Free'} Tier
-                      </span>
+                      <div className="flex items-center gap-2">
+                        {isSandbox && (
+                          <span className="bg-amber-100 text-amber-600 text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider">
+                            Sandbox
+                          </span>
+                        )}
+                        <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                          userData?.subscriptionTier === 'pro' ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          {userData?.subscriptionTier === 'pro' ? 'Pro' : 'Free'} Tier
+                        </span>
+                      </div>
                     </div>
                     
                     <div className="p-6 rounded-3xl border border-slate-200 bg-white shadow-sm">
@@ -2929,12 +3125,21 @@ export default function App() {
                               : `You have used ${userData?.analysesCount || 0}/3 free analyses. Upgrade for unlimited access.`}
                           </p>
                         </div>
-                        {userData?.subscriptionTier !== 'pro' && (
+                        {userData?.subscriptionTier !== 'pro' ? (
                           <button 
                             onClick={handleUpgrade}
                             className="shrink-0 px-6 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
                           >
                             Upgrade to Pro
+                          </button>
+                        ) : (
+                          <button 
+                            onClick={handleRestorePurchases}
+                            disabled={isRestoring}
+                            className="shrink-0 px-6 py-3 bg-white border border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-50 transition-all flex items-center gap-2"
+                          >
+                            {isRestoring && <Loader2 className="w-4 h-4 animate-spin" />}
+                            Restore Purchases
                           </button>
                         )}
                       </div>
@@ -2951,6 +3156,11 @@ export default function App() {
                           </div>
                         </div>
                       )}
+
+                      <div className="mt-4 flex items-center gap-4 text-[10px] text-slate-400">
+                        <a href="https://pawbehavior.app/terms" target="_blank" rel="noopener noreferrer" className="hover:text-indigo-600 underline">Terms of Use (EULA)</a>
+                        <a href="https://pawbehavior.app/privacy" target="_blank" rel="noopener noreferrer" className="hover:text-indigo-600 underline">Privacy Policy</a>
+                      </div>
                     </div>
                   </section>
 
@@ -3197,81 +3407,22 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Limit Modal */}
+      {/* Limit Modal / Subscription Page */}
       <AnimatePresence>
         {showLimitModal && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="bg-white rounded-[32px] p-8 max-w-md w-full shadow-2xl border border-slate-100"
-            >
-              <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center mb-6">
-                <AlertCircle className="w-8 h-8 text-indigo-600" />
-              </div>
-              <h3 className="text-2xl font-bold text-slate-900 mb-3">
-                {showLimitModal.type === 'analysis' ? 'Analysis Limit Reached' : 'Chat Limit Reached'}
-              </h3>
-              <p className="text-slate-500 mb-8 leading-relaxed">
-                {showLimitModal.message}
-              </p>
-              <div className="flex flex-col gap-3">
-                {(() => {
-                  const now = new Date();
-                  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-                  const lastAdDate = userData?.lastAdAnalysisDate ? new Date(userData.lastAdAnalysisDate.toMillis()) : null;
-                  const lastAdDay = lastAdDate ? new Date(lastAdDate.getFullYear(), lastAdDate.getMonth(), lastAdDate.getDate()).getTime() : 0;
-                  const currentDailyCount = (today > lastAdDay) ? 0 : (userData?.dailyAdAnalysesCount || 0);
-                  const isAnalysisLimitReached = showLimitModal.type === 'analysis' && currentDailyCount >= 3;
-
-                  return (
-                    <>
-                      <button 
-                        onClick={() => handleWatchAd(showLimitModal.type as 'analysis' | 'chat')}
-                        disabled={isWatchingAd || isAnalysisLimitReached}
-                        className={`w-full py-4 text-white font-bold rounded-2xl transition-all shadow-xl flex items-center justify-center gap-2 disabled:opacity-50 ${
-                          isAnalysisLimitReached ? 'bg-slate-400 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-100'
-                        }`}
-                      >
-                        {isWatchingAd ? (
-                          <Loader2 className="w-5 h-5 animate-spin" />
-                        ) : (
-                          <Play className="w-5 h-5" />
-                        )}
-                        {isWatchingAd ? 'Watching Ad...' : 
-                         isAnalysisLimitReached ? 'Daily Ad Limit Reached (3/3)' :
-                         `Watch Ad for +1 ${showLimitModal.type === 'analysis' ? 'Analysis' : 'Chat'}`}
-                      </button>
-                      {isAnalysisLimitReached && (
-                        <p className="text-[10px] text-center text-slate-400 font-medium">
-                          Free video view uploads are only available 3x daily. Resets at midnight.
-                        </p>
-                      )}
-                    </>
-                  );
-                })()}
-                <button 
-                  onClick={handleUpgrade}
-                  className="w-full py-4 bg-indigo-600 text-white font-bold rounded-2xl hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 flex items-center justify-center gap-2"
-                >
-                  Upgrade to Pro
-                </button>
-                <button 
-                  onClick={() => {
-                    setShowLimitModal(null);
-                    if (showLimitModal.type === 'analysis') {
-                      setPaywallCooldown(true);
-                      setTimeout(() => setPaywallCooldown(false), 5000); // 5 second cooldown
-                    }
-                  }}
-                  className="w-full py-4 text-slate-500 font-bold hover:bg-slate-50 rounded-2xl transition-all"
-                >
-                  Maybe Later
-                </button>
-              </div>
-            </motion.div>
-          </div>
+          <SubscriptionPage 
+            message={showLimitModal.message}
+            onUpgrade={handleUpgrade}
+            onRestore={handleRestorePurchases}
+            isSandbox={isSandbox}
+            onClose={() => {
+              setShowLimitModal(null);
+              if (showLimitModal.type === 'analysis') {
+                setPaywallCooldown(true);
+                setTimeout(() => setPaywallCooldown(false), 5000);
+              }
+            }}
+          />
         )}
       </AnimatePresence>
 
