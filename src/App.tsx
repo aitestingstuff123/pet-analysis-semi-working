@@ -191,7 +191,8 @@ import {
   updateProfile,
   sendPasswordResetEmail,
   handleFirestoreError,
-  OperationType
+  OperationType,
+  increment
 } from './lib/firebase';
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
@@ -442,8 +443,9 @@ export default function App() {
     if (!file || !user || !userData) return;
 
     // Check subscription limits
+    const isPro = userData.subscriptionTier === 'pro';
     const freeLimit = 3;
-    if (userData.subscriptionTier === 'free' && userData.analysesCount >= freeLimit) {
+    if (!isPro && userData.analysesCount >= freeLimit) {
       if ((userData.bonusAnalyses || 0) > 0) {
         // Bonus available, will be consumed upon successful analysis
         console.log("[Limits] Using bonus analysis. Remaining:", userData.bonusAnalyses - 1);
@@ -644,14 +646,15 @@ export default function App() {
       // Update user analysis count and consume bonus if used
       try {
         const userRef = doc(db, 'users', user.uid);
+        const isPro = userData.subscriptionTier === 'pro';
         const updates: any = {
-          analysesCount: (userData?.analysesCount || 0) + 1
+          analysesCount: increment(1)
         };
         
         // If we were over the free limit, consume a bonus
-        if (userData.subscriptionTier === 'free' && userData.analysesCount >= 3) {
+        if (!isPro && userData.analysesCount >= 3) {
           if ((userData.bonusAnalyses || 0) > 0) {
-            updates.bonusAnalyses = userData.bonusAnalyses - 1;
+            updates.bonusAnalyses = increment(-1);
           }
         }
         
@@ -689,16 +692,17 @@ export default function App() {
     if (!newMessage.trim() || !selectedAnalysis || isSendingMessage || !user || !userData) return;
 
     // Check subscription limits for chat
-    if (userData.subscriptionTier === 'free') {
+    const isPro = userData.subscriptionTier === 'pro';
+    if (!isPro) {
       const userMessagesCount = chatMessages.filter(m => m.role === 'user').length;
-      const freeLimit = 1;
+      const freeLimit = 2;
       
       if (userMessagesCount >= freeLimit) {
         if ((userData.bonusChats || 0) > 0) {
           // Consume a bonus chat
           try {
             await updateDoc(doc(db, 'users', user.uid), {
-              bonusChats: userData.bonusChats - 1
+              bonusChats: increment(-1)
             });
           } catch (error) {
             console.error("Failed to consume bonus chat:", error);
@@ -2260,7 +2264,7 @@ export default function App() {
                       <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
                         userData?.subscriptionTier === 'pro' ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-600'
                       }`}>
-                        {userData?.subscriptionTier || 'Free'} Tier
+                        {userData?.subscriptionTier === 'pro' ? 'Pro' : 'Free'} Tier
                       </span>
                     </div>
                     
@@ -2286,7 +2290,7 @@ export default function App() {
                         )}
                       </div>
                       
-                      {userData?.subscriptionTier === 'free' && (
+                      {userData?.subscriptionTier !== 'pro' && (
                         <div className="mt-6 pt-6 border-t border-slate-50 grid grid-cols-2 gap-4">
                           <div className="flex items-center gap-2 text-xs text-slate-500">
                             <CheckCircle2 className="w-4 h-4 text-emerald-500" />
@@ -2294,7 +2298,7 @@ export default function App() {
                           </div>
                           <div className="flex items-center gap-2 text-xs text-slate-500">
                             <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                            1 Chat per Analysis
+                            2 Chats per Analysis
                           </div>
                         </div>
                       )}
