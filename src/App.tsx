@@ -30,6 +30,8 @@ import {
   Send,
   Trash2,
   Settings,
+  Zap,
+  ShieldAlert,
   ArrowLeft,
   Utensils,
   Syringe,
@@ -349,6 +351,21 @@ export default function App() {
     type: 'success' | 'error';
   } | null>(null);
 
+  // Handle Stripe upgrade status from URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const upgradeStatus = params.get('upgrade');
+    
+    if (upgradeStatus === 'success') {
+      setNotification({ message: 'Welcome to Pro! Your upgrade was successful.', type: 'success' });
+      // Clean up URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (upgradeStatus === 'cancel') {
+      setNotification({ message: 'Upgrade cancelled. No charges were made.', type: 'error' });
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
+
   // Reminders state
   const [reminders, setReminders] = useState<any[]>([]);
   const [isAddingReminder, setIsAddingReminder] = useState(false);
@@ -365,6 +382,9 @@ export default function App() {
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
   const [isSendingReset, setIsSendingReset] = useState(false);
   const [settingsName, setSettingsName] = useState('');
+  const [showBotModal, setShowBotModal] = useState(false);
+  const [isBotVerified, setIsBotVerified] = useState(false);
+  const [routingInfo, setRoutingInfo] = useState<{ modelToUse: string; isHeavyUser: boolean; usageStats: any } | null>(null);
   const [userStats, setUserStats] = useState<any>(null);
 
   const updateStreak = async (userId: string) => {
@@ -635,6 +655,11 @@ export default function App() {
         }
 
         if (!response.ok) {
+          const errorData = JSON.parse(responseText);
+          if (errorData.code === "SOFT_PAUSE") {
+            setShowBotModal(true);
+            throw new Error(errorData.message);
+          }
           throw new Error(responseText || `Server error (${response.status})`);
         }
         
@@ -642,6 +667,11 @@ export default function App() {
         base64 = data.base64;
         mimeType = data.mimeType;
         mediaUrl = data.mediaUrl;
+        setRoutingInfo({
+          modelToUse: data.modelToUse,
+          isHeavyUser: data.isHeavyUser,
+          usageStats: data.usageStats
+        });
       } catch (err: any) {
         if (err.message === "AUTH_PROXY_INTERCEPTED" || err.message.includes("Failed to fetch")) {
           // Fallback: Direct upload from frontend
@@ -699,7 +729,7 @@ export default function App() {
       ` : '';
 
       const geminiResponse = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: routingInfo?.modelToUse || "gemini-3-flash-preview",
         contents: [
           {
             parts: [
@@ -844,8 +874,12 @@ export default function App() {
       try {
         const userRef = doc(db, 'users', user.uid);
         const isPro = userData.subscriptionTier === 'pro';
+        const now = new Date();
+        const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        
         const updates: any = {
-          analysesCount: increment(1)
+          analysesCount: increment(1),
+          [`monthlyUsage.${monthKey}`]: increment(1)
         };
         
         // If we were over the free limit, consume a bonus
@@ -972,14 +1006,28 @@ export default function App() {
   const handleUpgrade = async () => {
     if (!user) return;
     try {
-      await updateDoc(doc(db, 'users', user.uid), {
-        subscriptionTier: 'pro'
+      // Call backend to create Stripe Checkout session
+      const response = await fetch('/api/create-checkout-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: user.uid,
+          email: user.email,
+          stripeCustomerId: userData?.stripeId || userData?.stripeCustomerId
+        }),
       });
-      setNotification({ message: 'Welcome to Pro! You now have unlimited access.', type: 'success' });
-      setShowLimitModal(null);
-    } catch (error) {
+
+      const data = await response.json();
+      if (data.url) {
+        window.location.href = data.url; // Redirect to Stripe
+      } else {
+        throw new Error(data.error || 'Failed to create checkout session');
+      }
+    } catch (error: any) {
       console.error("Upgrade failed:", error);
-      setNotification({ message: 'Upgrade failed. Please try again.', type: 'error' });
+      setNotification({ message: `Upgrade failed: ${error.message}`, type: 'error' });
     }
   };
 
@@ -2810,6 +2858,18 @@ export default function App() {
               <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
                 <h3 className="text-2xl font-bold text-slate-900 mb-6">Account Settings</h3>
                 
+                {userData?.subscriptionTier === 'pro' && (
+                  <div className="mb-8 p-6 bg-indigo-50 rounded-2xl border border-indigo-100">
+                    <h4 className="text-lg font-bold text-indigo-900 mb-2 flex items-center gap-2">
+                      <Zap className="w-5 h-5" />
+                      Pro Membership Active
+                    </h4>
+                    <p className="text-sm text-indigo-700">
+                      You have unlimited access to all AI Behaviorist features.
+                    </p>
+                  </div>
+                )}
+                
                 <div className="space-y-8">
                   {/* Profile Section */}
                   <section className="space-y-4">
@@ -3210,6 +3270,58 @@ export default function App() {
                   Maybe Later
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Bot Verification Modal */}
+      <AnimatePresence>
+        {showBotModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl text-center"
+            >
+              <div className="w-20 h-20 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                <ShieldAlert className="w-10 h-10 text-amber-600" />
+              </div>
+              <h2 className="text-2xl font-bold text-slate-900 mb-4">Verification Required</h2>
+              <p className="text-slate-600 mb-8">
+                You've reached a high usage threshold (300+ analyses). To ensure service quality for everyone, please verify you are a human.
+              </p>
+              
+              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 mb-8">
+                <label className="flex items-center gap-4 cursor-pointer group">
+                  <input 
+                    type="checkbox" 
+                    className="w-6 h-6 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    onChange={(e) => setIsBotVerified(e.target.checked)}
+                  />
+                  <span className="text-lg font-medium text-slate-700 group-hover:text-indigo-600 transition-colors">
+                    I am not a bot
+                  </span>
+                </label>
+              </div>
+
+              <button
+                onClick={() => {
+                  if (isBotVerified) {
+                    setShowBotModal(false);
+                    setNotification({ message: "Verification successful. You can continue.", type: 'success' });
+                  }
+                }}
+                disabled={!isBotVerified}
+                className={`w-full py-4 rounded-2xl font-bold transition-all ${
+                  isBotVerified 
+                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700' 
+                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                }`}
+              >
+                Continue Analysis
+              </button>
             </motion.div>
           </div>
         )}

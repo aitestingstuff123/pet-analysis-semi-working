@@ -75,6 +75,12 @@ service cloud.firestore {
     //   - total_sessions: number (required)
     //   - activity_log: list of timestamps
     //
+    // Collection: processed_events
+    // Document ID: {eventId}
+    // Fields:
+    //   - type: string
+    //   - processedAt: timestamp
+    //
     // ===============================================================
 
     // ===============================================================
@@ -150,16 +156,15 @@ service cloud.firestore {
     // ===============================================================
     
     match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data);
-      allow update: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data);
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
     }
 
     match /analyses/{analysisId} {
-      allow read: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
-      allow create: if isAuthenticated() && isOwner(request.resource.data.userId) && isValidAnalysis(request.resource.data);
-      allow update: if isAuthenticated() && isOwner(resource.data.userId) && isValidAnalysis(request.resource.data);
-      allow delete: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
+      allow read, write: if isAuthenticated() && (
+        (request.method == 'create' && request.resource.data.userId == request.auth.uid) ||
+        (resource != null && resource.data.userId == request.auth.uid) ||
+        isAdmin()
+      );
       
       match /messages/{messageId} {
         allow read: if isAuthenticated() && (get(/databases/$(database)/documents/analyses/$(analysisId)).data.userId == request.auth.uid || isAdmin());
@@ -168,17 +173,19 @@ service cloud.firestore {
     }
 
     match /pets/{petId} {
-      allow read: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
-      allow create: if isAuthenticated() && isOwner(request.resource.data.userId) && isValidPet(request.resource.data);
-      allow update: if isAuthenticated() && isOwner(resource.data.userId) && isValidPet(request.resource.data);
-      allow delete: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
+      allow read, write: if isAuthenticated() && (
+        (request.method == 'create' && request.resource.data.userId == request.auth.uid) ||
+        (resource != null && resource.data.userId == request.auth.uid) ||
+        isAdmin()
+      );
     }
 
     match /reminders/{reminderId} {
-      allow read: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
-      allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
-      allow update: if isAuthenticated() && isOwner(resource.data.userId);
-      allow delete: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
+      allow read, write: if isAuthenticated() && (
+        (request.method == 'create' && request.resource.data.userId == request.auth.uid) ||
+        (resource != null && resource.data.userId == request.auth.uid) ||
+        isAdmin()
+      );
     }
 
     match /user_stats/{userId} {
@@ -186,11 +193,20 @@ service cloud.firestore {
       allow create, update: if isAuthenticated() && isOwner(userId) && isValidUserStats(request.resource.data);
     }
 
+    match /files/{fileId} {
+      allow read, write: if isAuthenticated() && (request.resource.data.userId == request.auth.uid || resource.data.userId == request.auth.uid || isAdmin());
+    }
+
     match /challenges/{challengeId} {
-      allow read: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
-      allow create: if isAuthenticated() && isOwner(request.resource.data.userId) && isValidChallenge(request.resource.data);
-      allow update: if isAuthenticated() && isOwner(resource.data.userId) && isValidChallenge(request.resource.data);
-      allow delete: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
+      allow read, write: if isAuthenticated() && (
+        (request.method == 'create' && request.resource.data.userId == request.auth.uid) ||
+        (resource != null && resource.data.userId == request.auth.uid) ||
+        isAdmin()
+      );
+    }
+
+    match /processed_events/{eventId} {
+      allow read, write: if isAdmin();
     }
 
     match /{document=**} {

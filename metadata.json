@@ -1,5 +1,5 @@
 {
   "name": "PawBehavior",
-  "description": "Professional AI behavior analysis, 7-day training challenges, and pet care management.",
+  "description": "Professional AI behavior analysis, 7-day training challenges, and pet care management with Stripe-powered Pro upgrades.",
   "requestFramePermissions": ["camera", "microphone"]
 }
