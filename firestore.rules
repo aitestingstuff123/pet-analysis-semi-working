@@ -162,8 +162,8 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
       
       match /messages/{messageId} {
-        allow read: if isAuthenticated();
-        allow create: if isAuthenticated() && isValidMessage(request.resource.data);
+        allow read: if isAuthenticated() && (get(/databases/$(database)/documents/analyses/$(analysisId)).data.userId == request.auth.uid || isAdmin());
+        allow create: if isAuthenticated() && (get(/databases/$(database)/documents/analyses/$(analysisId)).data.userId == request.auth.uid) && isValidMessage(request.resource.data);
       }
     }
 

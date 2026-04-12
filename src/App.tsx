@@ -548,7 +548,7 @@ export default function App() {
 
   // Listen for chat messages when an analysis is selected
   useEffect(() => {
-    if (!selectedAnalysis?.id) {
+    if (!selectedAnalysis?.id || !user) {
       setChatMessages([]);
       return;
     }
@@ -566,7 +566,7 @@ export default function App() {
     });
 
     return () => unsubscribeMessages();
-  }, [selectedAnalysis]);
+  }, [selectedAnalysis, user]);
 
   const handleInitiateUpload = () => {
     if (!user || !userData) return;
@@ -920,6 +920,7 @@ export default function App() {
 
     try {
       // 1. Save user message to Firestore
+      const userMsgPath = `analyses/${selectedAnalysis.id}/messages`;
       await addDoc(collection(db, 'analyses', selectedAnalysis.id, 'messages'), {
         analysisId: selectedAnalysis.id,
         userId: user.uid,
@@ -962,7 +963,7 @@ export default function App() {
       });
 
     } catch (error) {
-      console.error("Failed to send message:", error);
+      handleFirestoreError(error, OperationType.WRITE, `analyses/${selectedAnalysis.id}/messages`);
     } finally {
       setIsSendingMessage(false);
     }
@@ -1359,6 +1360,32 @@ export default function App() {
       }
     } catch (error) {
       console.error("Error sharing:", error);
+    }
+  };
+
+  const handleShareChallenge = async (challenge: any) => {
+    if (!challenge) return;
+    
+    const progress = challenge.completedDays?.length || 0;
+    const statusText = challenge.status === 'completed' 
+      ? `fully completed the "${challenge.title}" challenge!` 
+      : `completed ${progress}/7 days of the "${challenge.title}" challenge!`;
+
+    const shareData = {
+      title: `PawBehavior Training: ${challenge.petName || 'My Pet'}`,
+      text: `My pet ${challenge.petName || 'my pet'} has ${statusText} Check out PawBehavior for custom pet training!`,
+      url: window.location.href,
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+      } else {
+        await navigator.clipboard.writeText(`${shareData.text} ${shareData.url}`);
+        setNotification({ message: "Challenge progress copied to clipboard!", type: 'success' });
+      }
+    } catch (error) {
+      console.error("Error sharing challenge:", error);
     }
   };
 
@@ -1856,17 +1883,26 @@ export default function App() {
                       <ArrowLeft className="w-4 h-4" />
                       Back to Challenges
                     </button>
-                    <button 
-                      onClick={() => setDeleteConfirmation({
-                        type: 'challenge',
-                        id: selectedChallenge.id,
-                        name: selectedChallenge.title
-                      })}
-                      className="flex items-center gap-2 text-red-500 hover:text-red-700 font-medium px-4 py-2 rounded-xl hover:bg-red-50 transition-all"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      Delete Challenge
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={() => handleShareChallenge(selectedChallenge)}
+                        className="flex items-center gap-2 text-indigo-600 hover:text-indigo-700 font-medium px-4 py-2 rounded-xl hover:bg-indigo-50 transition-all"
+                      >
+                        <Share2 className="w-4 h-4" />
+                        Share Progress
+                      </button>
+                      <button 
+                        onClick={() => setDeleteConfirmation({
+                          type: 'challenge',
+                          id: selectedChallenge.id,
+                          name: selectedChallenge.title
+                        })}
+                        className="flex items-center gap-2 text-red-500 hover:text-red-700 font-medium px-4 py-2 rounded-xl hover:bg-red-50 transition-all"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        Delete Challenge
+                      </button>
+                    </div>
                   </div>
                   
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1977,6 +2013,15 @@ export default function App() {
                               }`}>
                                 {challenge.status}
                               </span>
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleShareChallenge(challenge);
+                                }}
+                                className="p-2 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                              >
+                                <Share2 className="w-4 h-4" />
+                              </button>
                               <button 
                                 onClick={(e) => {
                                   e.stopPropagation();
