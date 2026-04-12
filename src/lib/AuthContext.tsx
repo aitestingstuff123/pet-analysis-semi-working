@@ -34,11 +34,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         unsubscribeSnapshot = onSnapshot(userRef, (docSnap) => {
           if (docSnap.exists()) {
             const data = docSnap.data();
+            
+            // Ensure referral code exists for existing users
+            if (!data.referralCode) {
+              const referralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+              setDoc(userRef, { referralCode }, { merge: true }).catch(err => {
+                console.error("Error updating referral code:", err);
+              });
+            }
+
             setUserData(data);
             setIsAdmin(data.role === 'admin');
             setLoading(false);
           } else {
             // Document doesn't exist yet, create it
+            const referralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
             const initialData = {
               email: currentUser.email,
               displayName: currentUser.displayName,
@@ -48,6 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               analysesCount: 0,
               bonusAnalyses: 0,
               bonusChats: 0,
+              referralCode,
               createdAt: Timestamp.now()
             };
             setDoc(userRef, initialData).catch(err => {

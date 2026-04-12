@@ -1,5 +1,5 @@
 {
   "name": "PawBehavior",
-  "description": "Professional AI behavior analysis for your beloved pets using Gemini.",
+  "description": "Professional AI behavior analysis, 7-day training challenges, and pet care management.",
   "requestFramePermissions": ["camera", "microphone"]
 }

@@ -12,6 +12,26 @@ service cloud.firestore {
     //   - displayName: string
     //   - photoURL: string
     //   - role: string (required, 'user' | 'admin')
+    //   - subscriptionTier: string ('free' | 'pro')
+    //   - analysesCount: number
+    //   - bonusAnalyses: number
+    //   - bonusChats: number
+    //   - referralCode: string
+    //   - referredBy: string
+    //   - createdAt: timestamp
+    //
+    // Collection: challenges
+    // Document ID: {challengeId}
+    // Fields:
+    //   - userId: string (required)
+    //   - petId: string
+    //   - petName: string
+    //   - analysisId: string
+    //   - title: string (required)
+    //   - description: string
+    //   - days: list
+    //   - completedDays: list
+    //   - status: string ('active' | 'completed')
     //   - createdAt: timestamp
     //
     // Collection: analyses
@@ -80,7 +100,19 @@ service cloud.firestore {
              data.email is string &&
              data.role in ['user', 'admin'] &&
              (!('analysesCount' in data) || data.analysesCount is number) &&
+             (!('bonusAnalyses' in data) || data.bonusAnalyses is number) &&
+             (!('bonusChats' in data) || data.bonusChats is number) &&
+             (!('referralCode' in data) || data.referralCode is string) &&
+             (!('referredBy' in data) || data.referredBy is string) &&
              (!('subscriptionTier' in data) || data.subscriptionTier in ['free', 'pro']);
+    }
+
+    function isValidChallenge(data) {
+      return data.keys().hasAll(['userId', 'title', 'status', 'createdAt']) &&
+             data.userId is string &&
+             data.title is string &&
+             data.status in ['active', 'completed'] &&
+             data.createdAt is timestamp;
     }
 
     function isValidAnalysis(data) {
@@ -152,6 +184,13 @@ service cloud.firestore {
     match /user_stats/{userId} {
       allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
       allow create, update: if isAuthenticated() && isOwner(userId) && isValidUserStats(request.resource.data);
+    }
+
+    match /challenges/{challengeId} {
+      allow read: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId) && isValidChallenge(request.resource.data);
+      allow update: if isAuthenticated() && isOwner(resource.data.userId) && isValidChallenge(request.resource.data);
+      allow delete: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
     }
 
     match /{document=**} {

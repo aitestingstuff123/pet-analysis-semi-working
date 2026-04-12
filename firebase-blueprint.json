@@ -90,6 +90,24 @@
         }
       },
       "required": ["current_streak", "total_sessions"]
+    },
+    "Challenge": {
+      "title": "Challenge",
+      "description": "7-day training challenge generated from analysis",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "petId": { "type": "string" },
+        "petName": { "type": "string" },
+        "analysisId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "days": { "type": "array" },
+        "completedDays": { "type": "array" },
+        "status": { "type": "string", "enum": ["active", "completed"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -116,6 +134,10 @@
     "/user_stats/{userId}": {
       "schema": "UserStats",
       "description": "User training statistics"
+    },
+    "/challenges/{challengeId}": {
+      "schema": "Challenge",
+      "description": "Training challenges"
     }
   }
 }
