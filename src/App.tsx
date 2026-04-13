@@ -47,9 +47,12 @@ import {
 } from 'lucide-react';
 import { GoogleGenAI, Type } from '@google/genai';
 import confetti from 'canvas-confetti';
-import { Purchases, LogLevel } from "@revenuecat/purchases-js";
+import { Purchases, LOG_LEVEL } from "@revenuecat/purchases-capacitor";
+import { Capacitor } from '@capacitor/core';
 import { useAuth } from './lib/AuthContext';
 import { rewardedAdService } from './lib/RewardedAdService';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://ais-dev-mxn6iudwu5v3axtx5wv3ic-720914652018.europe-west2.run.app';
 
 const TrainingChallengeCard = ({ challenge, onCompleteDay }: { challenge: any, onCompleteDay?: (day: number) => void }) => {
   if (!challenge) return null;
@@ -441,6 +444,10 @@ export default function App() {
   useEffect(() => {
     if (user) {
       const initPurchases = async () => {
+        if (!Capacitor.isNativePlatform()) {
+          console.log("[RevenueCat] Skipping initialization on web platform.");
+          return;
+        }
         try {
           // In a real app, use different keys for iOS/Android/Web
           // For this web preview, we use the Public Web SDK Key
@@ -451,14 +458,14 @@ export default function App() {
             return;
           }
           
-          Purchases.configure(RC_PUBLIC_KEY, user.uid);
-          Purchases.setLogLevel(LogLevel.Debug);
+          await Purchases.setLogLevel({ level: LOG_LEVEL.DEBUG });
+          await Purchases.configure({ apiKey: RC_PUBLIC_KEY, appUserID: user.uid });
           
-          const purchases = Purchases.getSharedInstance();
-          const customerInfo = await purchases.getCustomerInfo();
-          setIsSandbox(purchases.isSandbox());
+          const { customerInfo } = await Purchases.getCustomerInfo();
+          // Capacitor plugin doesn't expose isSandbox directly like the web SDK, so we'll just set it to false or check entitlements
+          setIsSandbox(false);
           
-          console.log("[RevenueCat] Initialized for user:", user.uid, "Sandbox:", purchases.isSandbox());
+          console.log("[RevenueCat] Initialized for user:", user.uid);
         } catch (e) {
           console.error("[RevenueCat] Initialization failed:", e);
         }
@@ -492,6 +499,7 @@ export default function App() {
   const [isSendingReset, setIsSendingReset] = useState(false);
   const [settingsName, setSettingsName] = useState('');
   const [showBotModal, setShowBotModal] = useState(false);
+  const [showFairUseModal, setShowFairUseModal] = useState(false);
   const [isBotVerified, setIsBotVerified] = useState(false);
   const [routingInfo, setRoutingInfo] = useState<{ modelToUse: string; isHeavyUser: boolean; usageStats: any } | null>(null);
   const [userStats, setUserStats] = useState<any>(null);
@@ -741,7 +749,7 @@ export default function App() {
 
     try {
       // Step 1: Send to backend for compression AND storage upload
-      setUploadStatus('Compressing and uploading to secure storage...');
+      setUploadStatus('Compressing and uploading...');
       setUploadProgress(20);
       
       let base64: string;
@@ -749,7 +757,7 @@ export default function App() {
       let mediaUrl: string;
 
       try {
-        const response = await fetch('/api/process', {
+        const response = await fetch(`${API_BASE_URL}/api/process`, {
           method: 'POST',
           body: formData,
           credentials: 'include',
@@ -1114,15 +1122,21 @@ export default function App() {
 
   const handleUpgrade = async () => {
     if (!user) return;
+    
+    if (!Capacitor.isNativePlatform()) {
+      alert("In-app purchases are only available in the mobile app.");
+      setUploadStatus('');
+      return;
+    }
+
     try {
       setUploadStatus('Opening secure checkout...');
       
-      const purchases = Purchases.getSharedInstance();
-      // Get offerings from RevenueCat
-      const offerings = await purchases.getOfferings();
+      // Get offerings from RevenueCat Capacitor SDK
+      const offerings = await Purchases.getOfferings();
       if (offerings.current && offerings.current.monthly) {
         // Purchase the monthly package
-        const { customerInfo } = await purchases.purchasePackage(offerings.current.monthly);
+        const { customerInfo } = await Purchases.purchasePackage({ aPackage: offerings.current.monthly });
         
         console.log("[RevenueCat] Purchase completed. CustomerInfo:", customerInfo);
         
@@ -1131,13 +1145,12 @@ export default function App() {
         const hasAnyEntitlement = Object.keys(customerInfo.entitlements.active).length > 0;
         
         if (isPro || hasAnyEntitlement) {
-          const isSandboxPurchase = purchases.isSandbox();
           const entitlementName = isPro ? 'Pro' : Object.keys(customerInfo.entitlements.active)[0];
           
           // Sync with backend (for logging/webhook purposes)
           try {
             console.log("[RevenueCat] Syncing subscription with backend for user:", user.uid);
-            fetch('/api/sync-subscription', {
+            fetch(`${API_BASE_URL}/api/sync-subscription`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ app_user_id: user.uid })
@@ -1160,7 +1173,7 @@ export default function App() {
           }
 
           setNotification({ 
-            message: `Welcome to ${entitlementName}! Your account has been upgraded.${isSandboxPurchase ? ' (Sandbox Mode)' : ''}`, 
+            message: `Welcome to ${entitlementName}! Your account has been upgraded.`, 
             type: 'success' 
           });
           
@@ -1203,13 +1216,15 @@ export default function App() {
 
   const handleRestorePurchases = async () => {
     if (!user) return;
+    
+    if (!Capacitor.isNativePlatform()) {
+      alert("In-app purchases are only available in the mobile app.");
+      return;
+    }
+
     setIsRestoring(true);
     try {
-      const purchases = Purchases.getSharedInstance();
-      // Note: purchases-js doesn't have restorePurchases, it uses syncPurchases or getCustomerInfo
-      // Actually, looking at the types, it seems it might not have restorePurchases in the Web SDK
-      // Let's check the types again for sync or restore.
-      const customerInfo = await purchases.getCustomerInfo();
+      const customerInfo = await Purchases.restorePurchases();
       const isPro = !!customerInfo.entitlements.active.pro;
       const hasAnyEntitlement = Object.keys(customerInfo.entitlements.active).length > 0;
       
@@ -1219,7 +1234,7 @@ export default function App() {
         // Sync with backend immediately
         try {
           console.log("[RevenueCat] Syncing restored purchases with backend for user:", user.uid);
-          const response = await fetch('/api/sync-subscription', {
+          const response = await fetch(`${API_BASE_URL}/api/sync-subscription`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ app_user_id: user.uid })
@@ -3197,9 +3212,10 @@ export default function App() {
                         </div>
                       )}
 
-                      <div className="mt-4 flex items-center gap-4 text-[10px] text-slate-400">
+                      <div className="mt-4 flex flex-wrap items-center gap-4 text-[10px] text-slate-400">
                         <a href="https://pawbehavior.app/terms" target="_blank" rel="noopener noreferrer" className="hover:text-indigo-600 underline">Terms of Use (EULA)</a>
                         <a href="https://pawbehavior.app/privacy" target="_blank" rel="noopener noreferrer" className="hover:text-indigo-600 underline">Privacy Policy</a>
+                        <button onClick={() => setShowFairUseModal(true)} className="hover:text-indigo-600 underline">Fair Use Policy</button>
                       </div>
                     </div>
                   </section>
@@ -3512,6 +3528,55 @@ export default function App() {
                 }`}
               >
                 Continue Analysis
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Fair Use Policy Modal */}
+      <AnimatePresence>
+        {showFairUseModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-3xl p-8 max-w-lg w-full shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-slate-900">Unlimited Analysis Fair Use Policy</h2>
+                <button onClick={() => setShowFairUseModal(false)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              
+              <div className="space-y-6 text-slate-600 text-sm leading-relaxed">
+                <p>
+                  To ensure a high-quality experience for all users, our "Unlimited" plan is subject to a Fair Use Policy. This plan is intended for personal, non-commercial use by a single individual.
+                </p>
+
+                <div>
+                  <h4 className="font-bold text-slate-900 mb-1">Personal Use</h4>
+                  <p>Analysis is intended for pets owned by the subscriber. Commercial use (e.g., professional training facilities or shelters) requires a Business License.</p>
+                </div>
+
+                <div>
+                  <h4 className="font-bold text-slate-900 mb-1">Usage Caps</h4>
+                  <p>Accounts exceeding 300 analyses per month or 30 analyses per day may be subject to temporary speed throttling or a transition to our Standard Intelligence model.</p>
+                </div>
+
+                <div>
+                  <h4 className="font-bold text-slate-900 mb-1">Automated Use</h4>
+                  <p>Any attempt to use scripts, bots, or automated tools to submit videos is strictly prohibited and will result in immediate account termination.</p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowFairUseModal(false)}
+                className="w-full mt-8 py-4 bg-slate-100 text-slate-900 font-bold rounded-2xl hover:bg-slate-200 transition-all"
+              >
+                Close
               </button>
             </motion.div>
           </div>
