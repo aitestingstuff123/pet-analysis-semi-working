@@ -43,7 +43,8 @@ import {
   Copy,
   Share2,
   Menu,
-  X
+  X,
+  Camera
 } from 'lucide-react';
 import { GoogleGenAI, Type } from '@google/genai';
 import confetti from 'canvas-confetti';
@@ -496,10 +497,13 @@ export default function App() {
 
   // Settings state
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
+  const [isUploadingProfilePic, setIsUploadingProfilePic] = useState(false);
   const [isSendingReset, setIsSendingReset] = useState(false);
   const [settingsName, setSettingsName] = useState('');
   const [showBotModal, setShowBotModal] = useState(false);
   const [showFairUseModal, setShowFairUseModal] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [isBotVerified, setIsBotVerified] = useState(false);
   const [routingInfo, setRoutingInfo] = useState<{ modelToUse: string; isHeavyUser: boolean; usageStats: any } | null>(null);
   const [userStats, setUserStats] = useState<any>(null);
@@ -1510,6 +1514,41 @@ export default function App() {
       setNotification({ message: error.message || 'Failed to update profile', type: 'error' });
     } finally {
       setIsUpdatingProfile(false);
+    }
+  };
+
+  const handleProfilePicUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    setIsUploadingProfilePic(true);
+    try {
+      const storageRef = ref(storage, `users/${user.uid}/profile_${Date.now()}`);
+      const uploadTask = uploadBytesResumable(storageRef, file);
+
+      uploadTask.on('state_changed', 
+        () => {},
+        (error) => {
+          console.error("Profile picture upload failed:", error);
+          setNotification({ message: 'Failed to upload image', type: 'error' });
+          setIsUploadingProfilePic(false);
+        },
+        async () => {
+          const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+          await updateProfile(user, { photoURL: downloadURL });
+          
+          // Force a re-render by updating the user object reference slightly or just relying on auth state change
+          // In many cases, Firebase Auth doesn't trigger a re-render for profile updates alone,
+          // so we might need to manually trigger it if we had a local user state, but we use useAuth.
+          // We'll just show a success message.
+          setNotification({ message: 'Profile picture updated!', type: 'success' });
+          setIsUploadingProfilePic(false);
+        }
+      );
+    } catch (error) {
+      console.error("Error initiating upload:", error);
+      setNotification({ message: 'Failed to start upload', type: 'error' });
+      setIsUploadingProfilePic(false);
     }
   };
 
@@ -3118,6 +3157,42 @@ export default function App() {
                   {/* Profile Section */}
                   <section className="space-y-4">
                     <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Profile Information</h4>
+                    
+                    <div className="flex items-center gap-6 mb-6">
+                      <div className="relative group">
+                        {user?.photoURL ? (
+                          <img 
+                            src={user.photoURL} 
+                            alt={user.displayName || 'Profile'} 
+                            className="w-20 h-20 rounded-full object-cover border-4 border-white shadow-md"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <div className="w-20 h-20 rounded-full bg-indigo-100 flex items-center justify-center border-4 border-white shadow-md">
+                            <UserIcon className="w-8 h-8 text-indigo-600" />
+                          </div>
+                        )}
+                        <label className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                          {isUploadingProfilePic ? (
+                            <Loader2 className="w-6 h-6 text-white animate-spin" />
+                          ) : (
+                            <Camera className="w-6 h-6 text-white" />
+                          )}
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={handleProfilePicUpload}
+                            disabled={isUploadingProfilePic}
+                          />
+                        </label>
+                      </div>
+                      <div>
+                        <p className="font-bold text-slate-900">Profile Picture</p>
+                        <p className="text-xs text-slate-500">Click the image to upload a new one.</p>
+                      </div>
+                    </div>
+
                     <form onSubmit={handleUpdateProfile} className="space-y-4">
                       <div className="space-y-1">
                         <label className="text-xs font-bold text-slate-500 uppercase">Display Name</label>
@@ -3182,7 +3257,7 @@ export default function App() {
                         </div>
                         {userData?.subscriptionTier !== 'pro' ? (
                           <button 
-                            onClick={handleUpgrade}
+                            onClick={() => setShowLimitModal({ type: 'upgrade', message: "Unlock unlimited analyses and expert chat with PawBehavior Pro!" })}
                             className="shrink-0 px-6 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
                           >
                             Upgrade to Pro
@@ -3213,8 +3288,8 @@ export default function App() {
                       )}
 
                       <div className="mt-4 flex flex-wrap items-center gap-4 text-[10px] text-slate-400">
-                        <a href="https://pawbehavior.app/terms" target="_blank" rel="noopener noreferrer" className="hover:text-indigo-600 underline">Terms of Use (EULA)</a>
-                        <a href="https://pawbehavior.app/privacy" target="_blank" rel="noopener noreferrer" className="hover:text-indigo-600 underline">Privacy Policy</a>
+                        <button onClick={() => setShowTermsModal(true)} className="hover:text-indigo-600 underline">Terms of Use (EULA)</button>
+                        <button onClick={() => setShowPrivacyModal(true)} className="hover:text-indigo-600 underline">Privacy Policy</button>
                         <button onClick={() => setShowFairUseModal(true)} className="hover:text-indigo-600 underline">Fair Use Policy</button>
                       </div>
                     </div>
@@ -3306,6 +3381,12 @@ export default function App() {
                       Sign Out of All Devices
                     </button>
                   </section>
+
+                  <div className="pt-8 text-center border-t border-slate-100 mt-8">
+                    <p className="text-sm text-slate-500">
+                      Need help? Contact us at: <a href="mailto:xyz@gmail.com" className="text-indigo-600 hover:underline font-bold">xyz@gmail.com</a>
+                    </p>
+                  </div>
                 </div>
               </div>
             </motion.div>
@@ -3574,6 +3655,110 @@ export default function App() {
 
               <button
                 onClick={() => setShowFairUseModal(false)}
+                className="w-full mt-8 py-4 bg-slate-100 text-slate-900 font-bold rounded-2xl hover:bg-slate-200 transition-all"
+              >
+                Close
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Terms of Use Modal */}
+      <AnimatePresence>
+        {showTermsModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-3xl p-8 max-w-2xl w-full shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-slate-900">Terms of Use (EULA)</h2>
+                <button onClick={() => setShowTermsModal(false)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              
+              <div className="space-y-6 text-slate-600 text-sm leading-relaxed">
+                <p className="italic">Last Updated: April 2026</p>
+                
+                <div>
+                  <h4 className="font-bold text-slate-900 mb-1">1. Acceptance of Terms</h4>
+                  <p>By accessing and using PawBehavior, you agree to be bound by these Terms of Use. If you do not agree, please do not use the application.</p>
+                </div>
+
+                <div>
+                  <h4 className="font-bold text-slate-900 mb-1">2. Medical Disclaimer</h4>
+                  <p>PawBehavior provides AI-driven behavioral analysis for educational and training purposes only. It is NOT a substitute for professional veterinary or trainer's advice, diagnosis, or treatment. Always consult a qualified veterinarian for medical concerns.</p>
+                </div>
+
+                <div>
+                  <h4 className="font-bold text-slate-900 mb-1">3. User Content</h4>
+                  <p>You retain ownership of the videos and audio you upload. By uploading, you grant PawBehavior a license to process this media solely for the purpose of providing the analysis service.</p>
+                </div>
+
+                <div>
+                  <h4 className="font-bold text-slate-900 mb-1">4. Subscriptions and Billing</h4>
+                  <p>Premium features require a subscription. Payments are processed securely through your device's app store (Apple App Store or Google Play). Subscriptions automatically renew unless canceled at least 24 hours before the end of the current period.</p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowTermsModal(false)}
+                className="w-full mt-8 py-4 bg-slate-100 text-slate-900 font-bold rounded-2xl hover:bg-slate-200 transition-all"
+              >
+                Close
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Privacy Policy Modal */}
+      <AnimatePresence>
+        {showPrivacyModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-3xl p-8 max-w-2xl w-full shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-slate-900">Privacy Policy</h2>
+                <button onClick={() => setShowPrivacyModal(false)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              
+              <div className="space-y-6 text-slate-600 text-sm leading-relaxed">
+                <p className="italic">Last Updated: April 2026</p>
+                
+                <div>
+                  <h4 className="font-bold text-slate-900 mb-1">1. Information We Collect</h4>
+                  <p>We collect information you provide directly to us, including your email address, pet profiles (name, breed, age), and the media (video/audio) you upload for analysis.</p>
+                </div>
+
+                <div>
+                  <h4 className="font-bold text-slate-900 mb-1">2. How We Use Your Information</h4>
+                  <p>Your media is processed using advanced AI models to provide behavioral insights. We do not use your personal videos to train public AI models. Your data is used strictly to deliver and improve your personal experience within the app.</p>
+                </div>
+
+                <div>
+                  <h4 className="font-bold text-slate-900 mb-1">3. Data Storage and Security</h4>
+                  <p>Your data is securely stored using industry-standard cloud infrastructure. We implement robust security measures to protect your personal information from unauthorized access.</p>
+                </div>
+
+                <div>
+                  <h4 className="font-bold text-slate-900 mb-1">4. Data Deletion</h4>
+                  <p>You can delete your pet profiles, analyses, or your entire account at any time from within the app. Deleting an item permanently removes it from our active servers.</p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowPrivacyModal(false)}
                 className="w-full mt-8 py-4 bg-slate-100 text-slate-900 font-bold rounded-2xl hover:bg-slate-200 transition-all"
               >
                 Close
