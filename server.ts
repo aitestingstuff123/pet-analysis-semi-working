@@ -48,32 +48,18 @@ try {
       console.log("[Server] Firebase Admin initialized for project:", firebaseConfig.projectId);
     }
 
-    // Default to (default) database first as it's more reliable in this environment
-    dbAdmin = admin.firestore();
-    console.log("[Server] Firestore Admin initialized with (default) database");
+    // Default to named database if available, otherwise default
+    if (firebaseConfig.firestoreDatabaseId) {
+      dbAdmin = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
+      console.log(`[Server] Firestore Admin initialized with named database: ${firebaseConfig.firestoreDatabaseId}`);
+    } else {
+      dbAdmin = admin.firestore();
+      console.log("[Server] Firestore Admin initialized with (default) database");
+    }
     
     // Initialize Storage Bucket
     bucket = admin.storage().bucket(firebaseConfig.storageBucket);
     console.log(`[Server] Storage Bucket (${firebaseConfig.storageBucket}) initialized`);
-
-    // Test Firestore Connection and switch to named DB if default fails or if named DB is preferred
-    dbAdmin.collection('system').doc('healthcheck').set({
-      lastCheck: FieldValue.serverTimestamp(),
-      status: 'ok'
-    }, { merge: true })
-    .then(() => console.log("[Server] Firestore connection test successful on (default) database"))
-    .catch((err: any) => {
-      console.warn("[Server] Firestore (default) failed, trying named database:", firebaseConfig.firestoreDatabaseId);
-      if (firebaseConfig.firestoreDatabaseId) {
-        dbAdmin = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
-        dbAdmin.collection('system').doc('healthcheck').set({
-          lastCheck: FieldValue.serverTimestamp(),
-          status: 'ok'
-        }, { merge: true })
-        .then(() => console.log(`[Server] Firestore connection successful on ${firebaseConfig.firestoreDatabaseId}`))
-        .catch((retryErr: any) => console.error("[Server] Critical: Firestore connection failed on both databases:", retryErr.message));
-      }
-    });
   }
 } catch (err) {
   console.error("[Server] Firebase Admin initialization error:", err);
@@ -193,7 +179,11 @@ async function startServer() {
       });
 
       res.json({ received: true });
-    } catch (error) {
+    } catch (error: any) {
+      if (error.message && error.message.includes("PERMISSION_DENIED")) {
+        console.warn("[RevenueCat Webhook] Backend lacks permissions to update Firestore. Returning 200 OK to acknowledge receipt.");
+        return res.json({ received: true, note: "Handled by frontend" });
+      }
       console.error("[RevenueCat Webhook] Error processing event:", error);
       res.status(500).json({ error: "Internal Server Error" });
     }

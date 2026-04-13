@@ -128,7 +128,7 @@ const TrainingChallengeCard = ({ challenge, onCompleteDay }: { challenge: any, o
   );
 };
 
-const SubscriptionPage = ({ message, onUpgrade, onRestore, onClose, isSandbox }: { message: string, onUpgrade: () => void, onRestore: () => void, onClose: () => void, isSandbox?: boolean }) => {
+const SubscriptionPage = ({ message, onUpgrade, onRestore, onClose, isSandbox, onWatchAd, isWatchingAd, type }: { message: string, onUpgrade: () => void, onRestore: () => void, onClose: () => void, isSandbox?: boolean, onWatchAd?: () => void, isWatchingAd?: boolean, type?: 'analysis' | 'chat' | 'upgrade' }) => {
   return (
     <div className="fixed inset-0 z-[100] flex items-end lg:items-center justify-center p-0 lg:p-4 bg-slate-900/60 backdrop-blur-sm">
       <motion.div 
@@ -193,6 +193,21 @@ const SubscriptionPage = ({ message, onUpgrade, onRestore, onClose, isSandbox }:
           >
             Subscribe for $9.99/mo
           </button>
+          
+          {onWatchAd && type !== 'upgrade' && (
+            <button 
+              onClick={onWatchAd}
+              disabled={isWatchingAd}
+              className="w-full py-3 bg-slate-100 text-slate-700 font-bold rounded-2xl hover:bg-slate-200 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {isWatchingAd ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <Play className="w-5 h-5" />
+              )}
+              Watch Ad for 1 Free {type === 'chat' ? 'Chat' : 'Analysis'}
+            </button>
+          )}
           
           <button 
             onClick={onRestore}
@@ -390,7 +405,7 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [isSendingMessage, setIsSendingMessage] = useState(false);
-  const [showLimitModal, setShowLimitModal] = useState<{ type: 'analysis' | 'chat', message: string } | null>(null);
+  const [showLimitModal, setShowLimitModal] = useState<{ type: 'analysis' | 'chat' | 'upgrade', message: string } | null>(null);
   const [paywallCooldown, setPaywallCooldown] = useState(false);
 
   // Challenges state
@@ -1280,8 +1295,8 @@ export default function App() {
   };
 
   const [isWatchingAd, setIsWatchingAd] = useState(false);
-  const handleWatchAd = (type: 'analysis' | 'chat') => {
-    if (!user || !userData) return;
+  const handleWatchAd = (type: 'analysis' | 'chat' | 'upgrade') => {
+    if (!user || !userData || type === 'upgrade') return;
 
     // Check daily limit for analysis ads
     if (type === 'analysis') {
@@ -3552,6 +3567,9 @@ export default function App() {
             onUpgrade={handleUpgrade}
             onRestore={handleRestorePurchases}
             isSandbox={isSandbox}
+            onWatchAd={() => handleWatchAd(showLimitModal.type)}
+            isWatchingAd={isWatchingAd}
+            type={showLimitModal.type}
             onClose={() => {
               setShowLimitModal(null);
               if (showLimitModal.type === 'analysis') {
