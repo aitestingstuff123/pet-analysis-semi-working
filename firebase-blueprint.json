@@ -9,9 +9,13 @@
         "displayName": { "type": "string" },
         "photoURL": { "type": "string" },
         "role": { "type": "string", "enum": ["user", "admin"] },
+        "status": { "type": "string", "enum": ["free", "pro"] },
         "subscriptionTier": { "type": "string", "enum": ["free", "pro"] },
+        "is_subscriber": { "type": "boolean" },
         "analysesCount": { "type": "number" },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "monthlyUsage": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["email", "role", "subscriptionTier"]
     },

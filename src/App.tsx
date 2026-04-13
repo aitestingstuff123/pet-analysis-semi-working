@@ -1134,21 +1134,29 @@ export default function App() {
           const isSandboxPurchase = purchases.isSandbox();
           const entitlementName = isPro ? 'Pro' : Object.keys(customerInfo.entitlements.active)[0];
           
-          // Sync with backend immediately
+          // Sync with backend (for logging/webhook purposes)
           try {
-            const response = await fetch('/api/sync-subscription', {
+            console.log("[RevenueCat] Syncing subscription with backend for user:", user.uid);
+            fetch('/api/sync-subscription', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ app_user_id: user.uid })
-            });
-            const result = await response.json();
-            if (result.success) {
-              console.log("[RevenueCat] Backend sync successful:", result);
-            } else {
-              console.error("[RevenueCat] Backend sync failed:", result);
-            }
+            }).catch(e => console.error("Backend sync error:", e));
           } catch (syncErr) {
             console.error("[RevenueCat] Sync network error:", syncErr);
+          }
+
+          // Update Firestore directly from the frontend
+          try {
+            await updateDoc(doc(db, 'users', user.uid), {
+              status: "pro",
+              subscriptionTier: "pro",
+              is_subscriber: true,
+              updatedAt: Timestamp.now(),
+            });
+            console.log("[Firestore] Subscription updated successfully");
+          } catch (fsError) {
+            console.error("[Firestore] Failed to update subscription:", fsError);
           }
 
           setNotification({ 
@@ -1210,16 +1218,24 @@ export default function App() {
         
         // Sync with backend immediately
         try {
+          console.log("[RevenueCat] Syncing restored purchases with backend for user:", user.uid);
           const response = await fetch('/api/sync-subscription', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ app_user_id: user.uid })
           });
-          const result = await response.json();
-          if (result.success) {
-            console.log("[RevenueCat] Restore sync successful:", result);
+          
+          const contentType = response.headers.get("content-type");
+          if (contentType && contentType.indexOf("application/json") !== -1) {
+            const result = await response.json();
+            if (result.success) {
+              console.log("[RevenueCat] Restore sync successful:", result);
+            } else {
+              console.error("[RevenueCat] Restore sync failed with error:", result);
+            }
           } else {
-            console.error("[RevenueCat] Restore sync failed:", result);
+            const text = await response.text();
+            console.error("[RevenueCat] Restore sync returned non-JSON response:", text.substring(0, 200));
           }
         } catch (syncErr) {
           console.error("[RevenueCat] Restore sync network error:", syncErr);

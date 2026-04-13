@@ -8,7 +8,14 @@ import firebaseConfig from '../../firebase-applet-config.json';
 const app = initializeApp(firebaseConfig);
 
 // Initialize Services
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || undefined);
+let dbInstance;
+try {
+  dbInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId || undefined);
+} catch (e) {
+  console.warn("Failed to initialize Firestore with named database, falling back to default.");
+  dbInstance = getFirestore(app);
+}
+export const db = dbInstance;
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();

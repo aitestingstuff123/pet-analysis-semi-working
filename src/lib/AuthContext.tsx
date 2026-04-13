@@ -26,7 +26,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let unsubscribeSnapshot: (() => void) | null = null;
 
+    // Safety timeout to prevent infinite loading if auth state takes too long
+    const loadingTimeout = setTimeout(() => {
+      if (loading) {
+        console.warn("[AuthContext] Loading timeout reached. Forcing loading to false.");
+        setLoading(false);
+      }
+    }, 5000);
+
     const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
+      clearTimeout(loadingTimeout);
       setUser(currentUser);
       
       if (unsubscribeSnapshot) {
@@ -75,6 +84,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             };
             setDoc(userRef, initialData).catch(err => {
               console.error("Error creating user doc:", err);
+            }).finally(() => {
+              setLoading(false);
             });
           }
         }, (error) => {

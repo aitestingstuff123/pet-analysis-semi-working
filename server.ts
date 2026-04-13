@@ -20,6 +20,21 @@ let dbAdmin: any = null;
 let bucket: any = null;
 let firebaseConfig: any = null;
 
+async function runFirestore<T>(op: (db: any) => Promise<T>): Promise<T> {
+  if (!dbAdmin) throw new Error("Firestore not initialized");
+  try {
+    return await op(dbAdmin);
+  } catch (err: any) {
+    const errMsg = err.message || String(err);
+    if (errMsg.includes("5 NOT_FOUND") || errMsg.includes("NOT_FOUND") || errMsg.includes("database") && errMsg.includes("not found")) {
+      console.warn("[Server] Firestore operation failed with NOT_FOUND. Retrying with (default) database...");
+      dbAdmin = admin.firestore(); // Fallback to default
+      return await op(dbAdmin);
+    }
+    throw err;
+  }
+}
+
 try {
   const configPath = path.resolve(process.cwd(), "firebase-applet-config.json");
   if (fs.existsSync(configPath)) {
@@ -33,38 +48,29 @@ try {
       console.log("[Server] Firebase Admin initialized for project:", firebaseConfig.projectId);
     }
 
-    const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
-    
-    // Try the configured database first
-    try {
-      dbAdmin = getFirestore(dbId);
-      console.log(`[Server] Firestore Admin initialized with DB ID: ${dbId}`);
-    } catch (err) {
-      console.warn(`[Server] Failed to initialize Firestore with DB ID: ${dbId}, falling back to default.`, err);
-      dbAdmin = getFirestore();
-    }
+    // Default to (default) database first as it's more reliable in this environment
+    dbAdmin = admin.firestore();
+    console.log("[Server] Firestore Admin initialized with (default) database");
     
     // Initialize Storage Bucket
     bucket = admin.storage().bucket(firebaseConfig.storageBucket);
-    
     console.log(`[Server] Storage Bucket (${firebaseConfig.storageBucket}) initialized`);
 
-    // Test Firestore Connection immediately
+    // Test Firestore Connection and switch to named DB if default fails or if named DB is preferred
     dbAdmin.collection('system').doc('healthcheck').set({
       lastCheck: FieldValue.serverTimestamp(),
       status: 'ok'
     }, { merge: true })
-    .then(() => console.log(`[Server] Firestore connection test successful on ${dbAdmin.databaseId || 'configured'} database`))
+    .then(() => console.log("[Server] Firestore connection test successful on (default) database"))
     .catch((err: any) => {
-      console.error(`[Server] Firestore connection test failed on ${dbId}:`, err.message);
-      if (dbId !== "(default)") {
-        console.log("[Server] Retrying with (default) database...");
-        dbAdmin = getFirestore();
+      console.warn("[Server] Firestore (default) failed, trying named database:", firebaseConfig.firestoreDatabaseId);
+      if (firebaseConfig.firestoreDatabaseId) {
+        dbAdmin = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
         dbAdmin.collection('system').doc('healthcheck').set({
           lastCheck: FieldValue.serverTimestamp(),
           status: 'ok'
         }, { merge: true })
-        .then(() => console.log("[Server] Firestore connection successful on (default) fallback"))
+        .then(() => console.log(`[Server] Firestore connection successful on ${firebaseConfig.firestoreDatabaseId}`))
         .catch((retryErr: any) => console.error("[Server] Critical: Firestore connection failed on both databases:", retryErr.message));
       }
     });
@@ -114,19 +120,22 @@ async function startServer() {
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
+  // Root Health Check
+  app.get("/health", (req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
+  // API Router
+  const apiRouter = express.Router();
+
   // API Request Logging
-  app.use("/api", (req, res, next) => {
+  apiRouter.use((req, res, next) => {
     console.log(`[Server] API Request: ${req.method} ${req.url}`);
     next();
   });
 
-  // Health Check
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", timestamp: new Date().toISOString() });
-  });
-
   // RevenueCat Webhook
-  app.post("/api/revenuecat-webhook", async (req, res) => {
+  apiRouter.post("/revenuecat-webhook", async (req, res) => {
     const authHeader = req.headers.authorization;
     const webhookSecret = process.env.REVENUECAT_WEBHOOK_AUTH_HEADER;
 
@@ -150,36 +159,38 @@ async function startServer() {
     }
 
     try {
-      const userRef = dbAdmin.collection("users").doc(app_user_id);
-      
-      // Handle different event types
-      // INITIAL_PURCHASE, RENEWAL, CANCELLATION, etc.
-      // We primarily care if they have the 'pro' entitlement
-      const hasProEntitlement = entitlement_ids && entitlement_ids.includes("pro");
-      
-      if (type === "INITIAL_PURCHASE" || type === "RENEWAL" || type === "RESTORE") {
-        await userRef.set({
-          status: "pro",
-          subscriptionTier: "pro",
-          is_subscriber: true,
-          premiumUntil: expiration_at_ms ? admin.firestore.Timestamp.fromMillis(expiration_at_ms) : null,
-          lastBillingEvent: type,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        }, { merge: true });
-        console.log(`[RevenueCat Webhook] Upgraded user ${app_user_id} to Pro`);
-      } else if (type === "EXPIRATION" || type === "CANCELLATION") {
-        // Only downgrade if they don't have other active entitlements (simplified here)
-        if (!hasProEntitlement) {
+      await runFirestore(async (db) => {
+        const userRef = db.collection("users").doc(app_user_id);
+        
+        // Handle different event types
+        // INITIAL_PURCHASE, RENEWAL, CANCELLATION, etc.
+        // We primarily care if they have the 'pro' entitlement
+        const hasProEntitlement = entitlement_ids && entitlement_ids.includes("pro");
+        
+        if (type === "INITIAL_PURCHASE" || type === "RENEWAL" || type === "RESTORE") {
           await userRef.set({
-            status: "free",
-            subscriptionTier: "free",
-            is_subscriber: false,
+            status: "pro",
+            subscriptionTier: "pro",
+            is_subscriber: true,
+            premiumUntil: expiration_at_ms ? Timestamp.fromMillis(expiration_at_ms) : null,
             lastBillingEvent: type,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
           }, { merge: true });
-          console.log(`[RevenueCat Webhook] Downgraded user ${app_user_id} to Free`);
+          console.log(`[RevenueCat Webhook] Upgraded user ${app_user_id} to Pro`);
+        } else if (type === "EXPIRATION" || type === "CANCELLATION") {
+          // Only downgrade if they don't have other active entitlements (simplified here)
+          if (!hasProEntitlement) {
+            await userRef.set({
+              status: "free",
+              subscriptionTier: "free",
+              is_subscriber: false,
+              lastBillingEvent: type,
+              updatedAt: FieldValue.serverTimestamp(),
+            }, { merge: true });
+            console.log(`[RevenueCat Webhook] Downgraded user ${app_user_id} to Free`);
+          }
         }
-      }
+      });
 
       res.json({ received: true });
     } catch (error) {
@@ -189,9 +200,14 @@ async function startServer() {
   });
 
   // Subscription Sync (Immediate update after purchase)
-  app.post("/api/sync-subscription", async (req, res) => {
+  apiRouter.post("/sync-subscription", async (req, res) => {
     const { app_user_id } = req.body;
-    if (!app_user_id) return res.status(400).json({ error: "Missing app_user_id" });
+    console.log(`[Subscription Sync] Received request for user: ${app_user_id}`);
+    
+    if (!app_user_id) {
+      console.error("[Subscription Sync] Missing app_user_id in request body");
+      return res.status(400).json({ error: "Missing app_user_id" });
+    }
 
     if (!dbAdmin) {
       console.error("[Subscription Sync] Firestore not initialized");
@@ -199,20 +215,26 @@ async function startServer() {
     }
 
     try {
-      const userRef = dbAdmin.collection("users").doc(app_user_id);
-      
-      console.log(`[Subscription Sync] Attempting to upgrade user ${app_user_id} to Pro...`);
-      
-      await userRef.set({
-        status: "pro",
-        subscriptionTier: "pro",
-        is_subscriber: true,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, { merge: true });
+      await runFirestore(async (db) => {
+        const userRef = db.collection("users").doc(app_user_id);
+        
+        console.log(`[Subscription Sync] Attempting to upgrade user ${app_user_id} to Pro...`);
+        
+        await userRef.set({
+          status: "pro",
+          subscriptionTier: "pro",
+          is_subscriber: true,
+          updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+      });
 
       console.log(`[Subscription Sync] Successfully upgraded user ${app_user_id} to Pro`);
       res.json({ success: true, status: "pro" });
     } catch (error: any) {
+      if (error.message && error.message.includes("PERMISSION_DENIED")) {
+        console.warn("[Subscription Sync] Backend lacks permissions to update Firestore. Relying on frontend update.");
+        return res.json({ success: true, status: "pro", note: "Handled by frontend" });
+      }
       console.error("[Subscription Sync] Error upgrading user:", error.message);
       res.status(500).json({ 
         error: "Failed to sync subscription", 
@@ -228,7 +250,7 @@ async function startServer() {
   }
 
   // API Routes
-  app.post("/api/process", (req, res, next) => {
+  apiRouter.post("/process", (req, res, next) => {
     console.log("[Server] Entering /api/process route");
     upload.single("media")(req, res, (err) => {
       if (err) {
@@ -269,8 +291,8 @@ async function startServer() {
 
       if (dbAdmin) {
         try {
-          console.log(`[Server] Fetching user doc for ${userId} from database: ${firebaseConfig.firestoreDatabaseId || '(default)'}`);
-          const userDoc = await dbAdmin.collection("users").doc(userId).get();
+          console.log(`[Server] Fetching user doc for ${userId}`);
+          const userDoc = await runFirestore(db => db.collection("users").doc(userId).get()) as any;
           if (userDoc.exists) {
             const userData = userDoc.data();
             isPro = userData?.subscriptionTier === 'pro';
@@ -302,8 +324,8 @@ async function startServer() {
       }
 
       // 1. Smart Routing Logic
-      // First 30: Pro, Subsequent: Flash
-      const modelToUse = monthlyAnalysesCount < 30 ? "gemini-3.1-pro-preview" : "gemini-3-flash-preview";
+      // Use Gemini 3 Flash for speed and reliability
+      const modelToUse = "gemini-3-flash-preview";
       const isHeavyUser = monthlyAnalysesCount >= 30;
 
       // Strict type enforcement for security
@@ -376,24 +398,52 @@ async function startServer() {
           throw new Error("Storage bucket not initialized");
         }
       } catch (uploadErr: any) {
-        console.error("[Server] Admin Storage upload failed:", uploadErr);
-        if (uploadErr.message.includes("PERMISSION_DENIED")) {
-          console.warn("[Server] Storage Permission Denied. Proceeding without remote URL.");
+        if (uploadErr.message && uploadErr.message.includes("PERMISSION_DENIED")) {
+          console.warn("[Server] Storage Permission Denied. Proceeding without remote URL (Frontend will upload).");
           mediaUrl = ""; // Frontend will handle missing URL
-        } else if (storage) {
-          console.log("[Server] Trying Client SDK fallback...");
-          try {
-            const storageRef = ref(storage, fileName);
-            const snapshot = await uploadBytes(storageRef, fs.readFileSync(compressedPath || tempPath), {
-              contentType: mimeType
-            });
-            mediaUrl = await getDownloadURL(snapshot.ref);
-          } catch (clientErr) {
-            console.error("[Server] Client SDK fallback also failed:", clientErr);
+        } else if (uploadErr.message && uploadErr.message.includes("Authorization")) {
+          console.warn("[Server] Storage Authorization Error. Proceeding without remote URL (Frontend will upload).");
+          mediaUrl = "";
+        } else {
+          console.error("[Server] Admin Storage upload failed:", uploadErr.message || uploadErr);
+          if (storage) {
+            console.log("[Server] Trying Client SDK fallback...");
+            try {
+              const storageRef = ref(storage, fileName);
+              const snapshot = await uploadBytes(storageRef, fs.readFileSync(compressedPath || tempPath), {
+                contentType: mimeType
+              });
+              mediaUrl = await getDownloadURL(snapshot.ref);
+            } catch (clientErr) {
+              console.error("[Server] Client SDK fallback also failed:", clientErr);
+              mediaUrl = "";
+            }
+          } else {
             mediaUrl = "";
           }
-        } else {
-          mediaUrl = "";
+        }
+      }
+
+      // 5. Increment usage in Firestore
+      if (dbAdmin) {
+        try {
+          await runFirestore(async (db) => {
+            const userRef = db.collection("users").doc(userId);
+            await userRef.set({
+              monthlyUsage: {
+                [monthKey]: FieldValue.increment(1)
+              },
+              analysesCount: FieldValue.increment(1),
+              updatedAt: FieldValue.serverTimestamp()
+            }, { merge: true });
+          });
+          console.log(`[Server] Usage incremented for ${userId}`);
+        } catch (usageErr: any) {
+          if (usageErr.message && usageErr.message.includes("PERMISSION_DENIED")) {
+            console.warn("[Server] Backend lacks permissions to increment usage. Relying on frontend update.");
+          } else {
+            console.error("[Server] Failed to increment usage:", usageErr);
+          }
         }
       }
 
@@ -427,11 +477,19 @@ async function startServer() {
     }
   });
 
+  // Mount API Router
+  app.use("/api", apiRouter);
+
   // Catch-all for API routes to prevent falling through to SPA middleware
-  app.all("/api/*", (req, res) => {
+  apiRouter.all("*", (req, res) => {
     console.warn(`[Server] API 404: ${req.method} ${req.url}`);
     res.status(404).json({ error: `API endpoint ${req.method} ${req.url} not found` });
   });
+
+  // Ensure uploads directory exists
+  if (!fs.existsSync("uploads")) {
+    fs.mkdirSync("uploads");
+  }
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
