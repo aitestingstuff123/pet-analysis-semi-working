@@ -48,10 +48,7 @@ import {
 } from 'lucide-react';
 import { GoogleGenAI, Type } from '@google/genai';
 import confetti from 'canvas-confetti';
-import { Purchases, LOG_LEVEL } from "@revenuecat/purchases-capacitor";
-import { Capacitor } from '@capacitor/core';
 import { useAuth } from './lib/AuthContext';
-import { rewardedAdService } from './lib/RewardedAdService';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://ais-dev-mxn6iudwu5v3axtx5wv3ic-720914652018.europe-west2.run.app';
 
@@ -459,34 +456,7 @@ export default function App() {
   // Initialize RevenueCat
   useEffect(() => {
     if (user) {
-      const initPurchases = async () => {
-        if (!Capacitor.isNativePlatform()) {
-          console.log("[RevenueCat] Skipping initialization on web platform.");
-          return;
-        }
-        try {
-          // In a real app, use different keys for iOS/Android/Web
-          // For this web preview, we use the Public Web SDK Key
-          const RC_PUBLIC_KEY = import.meta.env.VITE_REVENUECAT_PUBLIC_KEY;
-          
-          if (!RC_PUBLIC_KEY || RC_PUBLIC_KEY === "goog_placeholder_key") {
-            console.warn("[RevenueCat] No valid API key found. Please set VITE_REVENUECAT_PUBLIC_KEY in your environment variables using a 'Web Billing' key from the RevenueCat dashboard.");
-            return;
-          }
-          
-          await Purchases.setLogLevel({ level: LOG_LEVEL.DEBUG });
-          await Purchases.configure({ apiKey: RC_PUBLIC_KEY, appUserID: user.uid });
-          
-          const { customerInfo } = await Purchases.getCustomerInfo();
-          // Capacitor plugin doesn't expose isSandbox directly like the web SDK, so we'll just set it to false or check entitlements
-          setIsSandbox(false);
-          
-          console.log("[RevenueCat] Initialized for user:", user.uid);
-        } catch (e) {
-          console.error("[RevenueCat] Initialization failed:", e);
-        }
-      };
-      initPurchases();
+      console.log("[Auth] User is authenticated, proceeding with app setup.");
     }
   }, [user]);
 
@@ -1243,7 +1213,7 @@ export default function App() {
 
     setIsRestoring(true);
     try {
-      const customerInfo = await Purchases.restorePurchases();
+      const { customerInfo } = await Purchases.restorePurchases();
       const isPro = !!customerInfo.entitlements.active.pro;
       const hasAnyEntitlement = Object.keys(customerInfo.entitlements.active).length > 0;
       

@@ -10,9 +10,5 @@
 	{
 		"pkg": "@capacitor/filesystem",
 		"classpath": "com.capacitorjs.plugins.filesystem.FilesystemPlugin"
-	},
-	{
-		"pkg": "@revenuecat/purchases-capacitor",
-		"classpath": "com.revenuecat.purchases.capacitor.PurchasesPlugin"
 	}
 ]

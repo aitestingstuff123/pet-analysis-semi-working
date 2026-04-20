@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Pet Analysis</string>
-    <string name="title_activity_main">Pet Analysis</string>
+    <string name="app_name">PawBehavior</string>
+    <string name="title_activity_main">PawBehavior</string>
     <string name="package_name">com.petanalysis.app</string>
     <string name="custom_url_scheme">com.petanalysis.app</string>
 </resources>
